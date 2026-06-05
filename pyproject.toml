@@ -16,10 +16,10 @@ dependencies = [
   "scipy>=1.11",
   "seaborn>=0.13",
   "soundfile>=0.12",
-  "speechbrain>=1.0.0",
+  "speechbrain>=1.0,<1.1",
   "torch>=2.1",
   "torchaudio>=2.1",
-  "transformers>=4.40",
+  "transformers>=4.40,<5",
 ]
 
 [project.optional-dependencies]
@@ -34,4 +34,3 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src", "scripts"]
-

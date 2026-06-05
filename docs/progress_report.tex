@@ -1,0 +1,188 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue
+}
+
+\title{Progress Report: LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition}
+\author{gradient\_based\_speach\_xai}
+\date{June 5, 2026}
+
+\begin{document}
+\maketitle
+
+\section{Project Goal}
+
+The project studies speech explainability for emotion recognition on IEMOCAP. The planned pipeline compares:
+
+\begin{enumerate}
+  \item SpeechXAI segment-level explanations.
+  \item A LeGrad-inspired temporal attribution method based on gradients with respect to Transformer attention maps.
+\end{enumerate}
+
+Both methods will be converted to ranked time intervals in seconds and evaluated using the same deletion protocol. For each audio sample, selected regions are replaced by silence while preserving the original audio length. The main metric is the confidence drop for the original predicted class:
+
+\[
+\mathrm{drop} = p_{\mathrm{original}}(\hat{y}) - p_{\mathrm{masked}}(\hat{y}).
+\]
+
+\section{Repository Setup Completed}
+
+The repository has been scaffolded around the diagnostic-first workflow described in \texttt{skill.md}. The main additions are:
+
+\begin{itemize}
+  \item \texttt{README.md}: project overview, setup instructions, notebook order, and expected outputs.
+  \item \texttt{pyproject.toml}: editable-install package metadata and dependencies.
+  \item \texttt{configs/default.yaml}: model name, paths, sample rate, SpeechXAI top-k values, random trials, and output file names.
+  \item \texttt{data/README.md}: expected local IEMOCAP metadata format.
+  \item \texttt{results/README.md}: placeholder for generated outputs.
+  \item \texttt{src/speech\_xai\_project/}: reusable project helpers.
+  \item \texttt{scripts/}: command-line runners for stable notebook logic.
+  \item \texttt{notebooks/01} through \texttt{notebooks/09}: one notebook per project phase.
+\end{itemize}
+
+\section{Reusable Code Added}
+
+The helper package \texttt{speech\_xai\_project} currently contains:
+
+\begin{longtable}{ll}
+\toprule
+\textbf{File} & \textbf{Purpose} \\
+\midrule
+\texttt{audio.py} & Audio loading, resampling, duration calculation, metadata discovery. \\
+\texttt{config.py} & YAML config loading and project-relative path resolution. \\
+\texttt{model.py} & SpeechBrain classifier loading and waveform classification helpers. \\
+\texttt{intervals.py} & Score normalization, interval selection, random intervals, token-to-time conversion. \\
+\texttt{masking.py} & Silence masking and total masked-duration calculation. \\
+\texttt{legrad.py} & LeGrad-inspired attention-gradient relevance aggregation. \\
+\texttt{evaluation.py} & Confidence-drop and deletion-result data structures. \\
+\texttt{plotting.py} & Waveform plotting and interval highlighting helpers. \\
+\bottomrule
+\end{longtable}
+
+\section{Notebook Plan Created}
+
+Nine notebooks were created to match the intended implementation order:
+
+\begin{enumerate}
+  \item \texttt{01\_inference\_iemocap.ipynb}: model inference on IEMOCAP.
+  \item \texttt{02\_attention\_access\_test.ipynb}: attention map access diagnostics.
+  \item \texttt{03\_attention\_gradient\_test.ipynb}: attention-gradient diagnostics.
+  \item \texttt{04\_legrad\_temporal\_explanation.ipynb}: LeGrad-inspired relevance intervals.
+  \item \texttt{05\_speechxai\_explanations.ipynb}: SpeechXAI segment explanations.
+  \item \texttt{06\_unified\_interval\_masking.ipynb}: common interval format and silence masking.
+  \item \texttt{07\_deletion\_evaluation.ipynb}: confidence-drop evaluation.
+  \item \texttt{08\_qualitative\_examples.ipynb}: report-ready qualitative examples.
+  \item \texttt{09\_final\_results\_summary.ipynb}: final tables and plots.
+\end{enumerate}
+
+\section{Step 1 Work Completed}
+
+Step 1 is the classifier inference phase. The following work has been done:
+
+\begin{itemize}
+  \item \texttt{01\_inference\_iemocap.ipynb} was updated to load metadata from \texttt{data/metadata.csv} when available.
+  \item If no metadata file exists, the notebook discovers audio files under \texttt{data/iemocap}.
+  \item The notebook now raises a clear error when no audio is available instead of failing later at an unclear indexing operation.
+  \item \texttt{scripts/run\_inference.py} was added as a command-line equivalent of the Step 1 inference workflow.
+  \item The runner writes \texttt{results/predictions.csv} once IEMOCAP audio and required dependencies are available.
+\end{itemize}
+
+The expected metadata format is:
+
+\begin{verbatim}
+audio_id,audio_path,true_label
+Ses01F_impro01_F000,data/iemocap/path/to/file.wav,neutral
+\end{verbatim}
+
+
+\section{Corrected Quantitative Evaluation}
+
+The quantitative deletion protocol was updated after the initial scaffold. The old fixed-percentage masking budgets are no longer the project protocol. Because SpeechXAI naturally produces word-level explanations, SpeechXAI now defines the masking duration.
+
+For each audio sample and each $k \in \{1,2,3,5\}$, the top-$k$ SpeechXAI words are selected and their total duration $X$ is computed. SpeechXAI masks exactly those word intervals. LeGrad masks its highest-scoring time bins whose total duration equals $X$. The random baseline masks random time bins with the same total duration $X$, repeated over multiple random trials. This keeps the classifier, audio sample, masking operation, and amount of removed audio fixed across methods; only the selected regions differ.
+
+The deletion-results table should therefore include:
+
+\begin{verbatim}
+audio_id, k, method, masked_duration, original_label,
+original_confidence, masked_confidence, drop, relative_drop,
+prediction_flipped, random_trial
+\end{verbatim}
+
+\section{Notebook Execution Results}
+
+The notebooks were executed using:
+
+\begin{verbatim}
+python -m nbconvert --to notebook --execute --inplace
+  --ExecutePreprocessor.timeout=300
+  --ExecutePreprocessor.kernel_name=python3 <notebook>
+\end{verbatim}
+
+The command \texttt{jupyter nbconvert} was not available as a command shim, but \texttt{python -m nbconvert} worked.
+
+\begin{longtable}{lll}
+\toprule
+\textbf{Notebook} & \textbf{Result} & \textbf{Reason or Notes} \\
+\midrule
+\texttt{01\_inference\_iemocap.ipynb} & Failed & No IEMOCAP audio or \texttt{data/metadata.csv}. \\
+\texttt{02\_attention\_access\_test.ipynb} & Failed & \texttt{speechbrain} is not installed. \\
+\texttt{03\_attention\_gradient\_test.ipynb} & Passed & Placeholder diagnostic notebook executed. \\
+\texttt{04\_legrad\_temporal\_explanation.ipynb} & Passed & Placeholder explanation notebook executed. \\
+\texttt{05\_speechxai\_explanations.ipynb} & Passed & Placeholder SpeechXAI notebook executed. \\
+\texttt{06\_unified\_interval\_masking.ipynb} & Passed & Placeholder masking notebook executed. \\
+\texttt{07\_deletion\_evaluation.ipynb} & Passed & Placeholder evaluation notebook executed. \\
+\texttt{08\_qualitative\_examples.ipynb} & Passed & Placeholder qualitative notebook executed. \\
+\texttt{09\_final\_results\_summary.ipynb} & Failed & \texttt{results/deletion\_results.csv} does not exist yet. \\
+\bottomrule
+\end{longtable}
+
+\section{Validation Already Run}
+
+The following validation checks have been run:
+
+\begin{itemize}
+  \item Python compilation for \texttt{src} and \texttt{scripts}.
+  \item JSON parsing for all nine notebooks.
+  \item Notebook execution via \texttt{python -m nbconvert}.
+  \item Step 1 smoke test with \texttt{python scripts\textbackslash run\_inference.py --limit 1}.
+\end{itemize}
+
+The Step 1 smoke test reached the intended data blocker and reported that no audio files were found under \texttt{data/iemocap} and no \texttt{data/metadata.csv} was present.
+
+\section{Current Blockers}
+
+Real experimental progress is currently blocked by missing local resources and dependencies:
+
+\begin{itemize}
+  \item \texttt{torchaudio} is not installed.
+  \item \texttt{speechbrain} is not installed.
+  \item No IEMOCAP audio is present under \texttt{data/iemocap}.
+  \item No \texttt{data/metadata.csv} exists.
+  \item \texttt{results/deletion\_results.csv} cannot exist until inference, explanations, masking, and deletion evaluation have run on real audio.
+\end{itemize}
+
+\section{Next Steps}
+
+\begin{enumerate}
+  \item Install project dependencies, especially \texttt{torchaudio} and \texttt{speechbrain}.
+  \item Add IEMOCAP audio under \texttt{data/iemocap} or create \texttt{data/metadata.csv}.
+  \item Re-run \texttt{01\_inference\_iemocap.ipynb} and confirm that \texttt{results/predictions.csv} is generated.
+  \item Re-run \texttt{02\_attention\_access\_test.ipynb} and identify where the wav2vec2 encoder lives inside the SpeechBrain wrapper.
+  \item Only after attention maps and attention gradients are confirmed, implement the full LeGrad-inspired explanation notebook.
+\end{enumerate}
+
+\section{Development Rule Added}
+
+The project behavior in \texttt{skill.md} was updated so that each notebook created or modified for a project step must be executed before the step is considered complete. If execution is blocked by missing data, dependencies, or credentials, the blocker and failed command must be reported explicitly.
+
+\end{document}

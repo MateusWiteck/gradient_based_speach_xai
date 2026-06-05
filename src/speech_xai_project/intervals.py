@@ -54,20 +54,19 @@ def token_relevance_to_intervals(
     )
 
 
-def select_intervals_by_budget(
+def select_intervals_by_duration(
     intervals_table: pd.DataFrame,
-    audio_duration: float,
-    budget_fraction: float,
+    duration_seconds: float,
     mode: SelectionMode = "top",
 ) -> pd.DataFrame:
-    """Select ranked intervals until the requested duration budget is reached.
+    """Select ranked intervals until the requested duration in seconds is reached.
 
-    The last selected interval is clipped so total duration does not exceed the budget.
+    This is the main helper for the corrected evaluation: SpeechXAI top-k words
+    determine a duration X, then LeGrad and random baselines receive the same X.
     """
     if intervals_table.empty:
         return intervals_table.copy()
 
-    budget_seconds = audio_duration * budget_fraction
     ascending = mode == "bottom"
     ranked = intervals_table.sort_values("score", ascending=ascending).copy()
     selected_rows = []
@@ -79,7 +78,7 @@ def select_intervals_by_budget(
         duration = max(0.0, end - start)
         if duration == 0.0:
             continue
-        remaining = budget_seconds - used_seconds
+        remaining = duration_seconds - used_seconds
         if remaining <= 1e-9:
             break
         clipped_end = start + min(duration, remaining)
@@ -91,14 +90,26 @@ def select_intervals_by_budget(
     return pd.DataFrame(selected_rows, columns=intervals_table.columns)
 
 
-def random_intervals(
+def select_top_k_intervals(
+    intervals_table: pd.DataFrame,
+    k: int,
+    mode: SelectionMode = "top",
+) -> pd.DataFrame:
+    """Select top or bottom k scored intervals without changing their durations."""
+    if intervals_table.empty:
+        return intervals_table.copy()
+    ascending = mode == "bottom"
+    return intervals_table.sort_values("score", ascending=ascending).head(k).copy()
+
+
+def random_intervals_by_duration(
     audio_id: str,
     audio_duration: float,
-    budget_fraction: float,
+    duration_seconds: float,
     bin_seconds: float = 0.05,
     seed: int | None = None,
 ) -> pd.DataFrame:
-    """Sample random fixed-size bins until a duration budget is reached."""
+    """Sample random fixed-size bins until a duration in seconds is reached."""
     rng = np.random.default_rng(seed)
     bin_count = max(1, int(np.ceil(audio_duration / bin_seconds)))
     starts = np.arange(bin_count) * bin_seconds
@@ -111,5 +122,4 @@ def random_intervals(
             "score": rng.random(bin_count),
         }
     )
-    return select_intervals_by_budget(candidates, audio_duration, budget_fraction, mode="top")
-
+    return select_intervals_by_duration(candidates, duration_seconds, mode="top")

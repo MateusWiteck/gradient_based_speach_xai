@@ -19,23 +19,48 @@ def load_speechbrain_classifier(source: str, savedir: str | Path):
 
     Importing SpeechBrain lazily keeps utility imports usable before dependencies are installed.
     """
+    import torchaudio
+
+    if not hasattr(torchaudio, "set_audio_backend"):
+        torchaudio.set_audio_backend = lambda backend: None
+    if not hasattr(torchaudio, "get_audio_backend"):
+        torchaudio.get_audio_backend = lambda: None
+    if not hasattr(torchaudio, "list_audio_backends"):
+        torchaudio.list_audio_backends = lambda: ["soundfile"]
+
     try:
         from speechbrain.inference.classifiers import EncoderClassifier
+        from speechbrain.utils.fetching import LocalStrategy
     except ImportError:
         from speechbrain.pretrained import EncoderClassifier
+        LocalStrategy = None
 
-    return EncoderClassifier.from_hparams(source=source, savedir=str(savedir))
+    kwargs = {"source": source, "savedir": str(savedir)}
+    if LocalStrategy is not None:
+        kwargs["local_strategy"] = LocalStrategy.COPY
+
+    return EncoderClassifier.from_hparams(**kwargs)
 
 
 def classify_waveform(classifier, waveform: torch.Tensor) -> Prediction:
     """Run a SpeechBrain classifier and return a normalized prediction object."""
     with torch.no_grad():
-        output_probabilities, score, index, text_label = classifier.classify_batch(waveform)
+        if hasattr(classifier.mods, "compute_features"):
+            output_probabilities, score, index, text_label = classifier.classify_batch(waveform)
+        else:
+            features = classifier.mods.wav2vec2(waveform)
+            pooled_features = classifier.mods.avg_pool(features)
+            logits = classifier.mods.output_mlp(pooled_features)
+            output_probabilities = classifier.hparams.softmax(logits).squeeze(1)
+            score, index = torch.max(output_probabilities, dim=-1)
+            text_label = classifier.hparams.label_encoder.decode_torch(index)
 
     probabilities = output_probabilities.detach().cpu().squeeze(0)
     predicted_index = int(index.detach().cpu().reshape(-1)[0])
     predicted_confidence = float(score.detach().cpu().reshape(-1)[0])
-    predicted_label = str(text_label[0] if isinstance(text_label, list) else text_label)
+    while isinstance(text_label, list):
+        text_label = text_label[0]
+    predicted_label = str(text_label)
     return Prediction(
         predicted_label=predicted_label,
         predicted_index=predicted_index,
@@ -52,4 +77,3 @@ def print_module_tree(model, max_depth: int = 3) -> None:
             indent = "  " * depth
             label = name or "<root>"
             print(f"{indent}{label}: {module.__class__.__name__}")
-

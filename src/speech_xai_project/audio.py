@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+import soundfile as sf
 import torch
-import torchaudio
 
 
 def audio_id_from_path(audio_path: str | Path) -> str:
@@ -16,7 +17,13 @@ def load_waveform(
     mono: bool = True,
 ) -> tuple[torch.Tensor, int]:
     """Load audio as a tensor shaped [channels, samples]."""
-    waveform, sample_rate = torchaudio.load(str(audio_path))
+    import torchaudio
+
+    try:
+        waveform, sample_rate = torchaudio.load(str(audio_path))
+    except ImportError:
+        audio_samples, sample_rate = sf.read(str(audio_path), always_2d=True)
+        waveform = torch.from_numpy(audio_samples.T).float()
     if mono and waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if sample_rate != target_sample_rate:
@@ -38,3 +45,38 @@ def waveform_to_batch(waveform: torch.Tensor) -> torch.Tensor:
         return waveform
     return waveform.mean(dim=0, keepdim=True)
 
+
+def discover_audio_metadata(iemocap_root: str | Path, limit: int | None = None) -> pd.DataFrame:
+    """Build a simple metadata table from local audio files."""
+    root = Path(iemocap_root)
+    audio_paths = []
+    for extension in ("*.wav", "*.flac", "*.mp3"):
+        audio_paths.extend(root.rglob(extension))
+
+    audio_paths = sorted(audio_paths)
+    if limit is not None:
+        audio_paths = audio_paths[:limit]
+
+    return pd.DataFrame(
+        {
+            "audio_id": [path.stem for path in audio_paths],
+            "audio_path": [str(path) for path in audio_paths],
+            "true_label": [None for _ in audio_paths],
+        }
+    )
+
+
+def load_metadata_or_discover(
+    metadata_csv: str | Path,
+    iemocap_root: str | Path,
+    limit: int | None = None,
+) -> pd.DataFrame:
+    """Load configured metadata or discover audio files from the dataset root."""
+    metadata_path = Path(metadata_csv)
+    if metadata_path.exists():
+        metadata_table = pd.read_csv(metadata_path)
+        if limit is not None:
+            metadata_table = metadata_table.head(limit)
+        return metadata_table
+
+    return discover_audio_metadata(iemocap_root, limit=limit)

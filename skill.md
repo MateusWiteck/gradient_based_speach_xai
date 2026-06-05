@@ -14,6 +14,8 @@ The final evaluation should compare both methods using the same deletion/occlusi
 Important behavior:
 For each project step, create a separate Jupyter notebook. Each notebook must be experimental and self-contained enough to test partial progress. Do not only write final scripts. I want to see intermediate outputs, sanity checks, plots, tensor shapes, example predictions, and small tests before moving to the next step.
 
+When a notebook is created or modified for a project step, run that notebook before considering the step complete. Also run the relevant evaluation, validation, or smoke test for that step. If the notebook cannot be run because of a concrete blocker such as missing data, missing dependencies, or unavailable credentials, explicitly report the blocker and the exact command/check that failed.
+
 Use simple, clear, incremental development. Prefer working minimal versions over complex abstractions. When there are multiple possible solutions, choose the easiest robust one.
 
 Dataset:
@@ -143,7 +145,7 @@ Tasks:
 - Normalize relevance scores.
 - Map token indices to time intervals.
 - Plot waveform with relevance over time.
-- Extract top relevant intervals under a fixed budget.
+- Extract top relevant intervals that can be selected later under a SpeechXAI-derived duration X.
 
 Show:
 - Token relevance curve.
@@ -186,49 +188,56 @@ audio_id, start, end, score
 Success criterion:
 SpeechXAI produces ranked intervals for the same audios used by the LeGrad-like method.
 
-Notebook 06 — Unified interval representation and masking
+Notebook 06 - Unified interval representation and masking
 Goal:
-Convert all explanation methods into a common time-interval format and implement silence masking.
+Convert all explanation methods into a common time-interval format and implement silence masking using SpeechXAI top-k words as the shared duration source.
 
 Tasks:
 - Load legrad_explanations.csv.
 - Load speechxai_explanations.csv.
-- Implement function to select top intervals until a budget is reached.
-- Use budgets based on percentage of audio duration:
-  10%, 20%, 30%
-- Implement random interval selection with the same total duration.
-- Implement bottom-relevance selection for each method.
+- Use top-k SpeechXAI words to define the masking duration X.
+- Use k values:
+  1, 2, 3, 5
+- For each audio and each k, select the top-k SpeechXAI word intervals.
+- Compute X as the total duration of those SpeechXAI intervals.
+- Select LeGrad top bins until their total duration is X.
+- Select random bins until their total duration is X.
+- Repeat random selection multiple times, for example 20 random trials.
+- Optional: implement LeGrad-bottom using the same X.
 - Implement silence masking while preserving audio length.
 
 Important:
-All methods must mask the same total duration for a given audio and budget.
+SpeechXAI determines the shared duration X. For a given audio and k, all compared methods must mask the same total duration X derived from the SpeechXAI top-k words.
 
 Show:
 - Original waveform.
-- Masked waveform for SpeechXAI top.
-- Masked waveform for LeGrad top.
-- Masked waveform for random.
+- Masked waveform for SpeechXAI top-k.
+- Masked waveform for LeGrad top bins with the same X.
+- Masked waveform for random bins with the same X.
 - Print total masked duration for each method to verify fairness.
 
 Success criterion:
-Given one audio and one budget, the notebook creates comparable masked versions for:
+Given one audio and one k, the notebook creates comparable masked versions for:
 - SpeechXAI-top
 - LeGrad-top
 - Random
-- SpeechXAI-bottom
-- LeGrad-bottom
+- Optional LeGrad-bottom
 
-Notebook 07 — Deletion/occlusion evaluation
+Notebook 07 - Deletion/occlusion evaluation
 Goal:
-Evaluate faithfulness using confidence drop.
+Evaluate faithfulness using confidence drop under the corrected SpeechXAI-top-k duration protocol.
 
 For each audio:
 1. Run original classifier.
 2. Store original predicted class y_hat.
 3. Store original confidence p_original(y_hat).
-4. For each method and budget, mask selected regions.
-5. Run classifier again.
-6. Measure:
+4. Run SpeechXAI and LeGrad-like explanations.
+5. For each k in {1, 2, 3, 5}, select the top-k SpeechXAI words.
+6. Compute X = total duration of those top-k SpeechXAI word intervals.
+7. Mask those SpeechXAI intervals and evaluate confidence drop.
+8. Select LeGrad top bins whose total duration is X and evaluate confidence drop.
+9. Select random bins whose total duration is X, repeat multiple random trials, and evaluate confidence drop.
+10. Measure:
 drop = p_original(y_hat) - p_masked(y_hat)
 relative_drop = drop / p_original(y_hat)
 prediction_flipped = whether predicted label changed
@@ -237,27 +246,28 @@ Conditions:
 - SpeechXAI-top
 - LeGrad-top
 - Random
-- SpeechXAI-bottom
-- LeGrad-bottom
+- Optional LeGrad-bottom
 
-Budgets:
-- 10%
-- 20%
-- 30%
+Top-k values:
+- 1
+- 2
+- 3
+- 5
 
 Output:
 Save deletion_results.csv with:
-audio_id, method, budget, original_label, original_confidence, masked_confidence, drop, relative_drop, prediction_flipped
+audio_id, k, method, masked_duration, original_label, original_confidence, masked_confidence, drop, relative_drop, prediction_flipped, random_trial
 
 Show:
 - Results for one audio.
-- Mean confidence drop table.
+- Mean confidence drop table by k.
+- Mean masked duration by k.
 - Boxplot of drops by method.
-- Deletion curve: budget vs mean confidence drop.
+- Deletion curve: k vs mean confidence drop.
 - Flip rate table.
 
 Success criterion:
-We can compare whether SpeechXAI or LeGrad-like explanations cause larger confidence drops than random and bottom masking.
+We can compare whether SpeechXAI or LeGrad-like explanations cause larger confidence drops than repeated random masking under the same SpeechXAI-derived masked duration.
 
 Notebook 08 — Qualitative examples
 Goal:
@@ -289,15 +299,15 @@ Aggregate all results and generate final tables/plots.
 
 Tasks:
 - Load deletion_results.csv.
-- Compute mean and standard deviation of confidence drop by method and budget.
+- Compute mean and standard deviation of confidence drop by method and k.
 - Compute relative drop.
 - Compute flip rate.
 - Optionally compute class-wise results.
 - Generate final plots.
 
 Final tables:
-1. Mean confidence drop by method and budget.
-2. Relative confidence drop by method and budget.
+1. Mean confidence drop by method and k.
+2. Relative confidence drop by method and k.
 3. Prediction flip rate by method.
 4. Optional class-wise performance.
 
@@ -313,17 +323,17 @@ This notebook contains the main evidence needed for the final report.
 Evaluation protocol:
 Use the same audios for all methods.
 Use the same classifier for all evaluations.
-Use the same masking budgets.
+Use the same SpeechXAI-derived masked duration X for all methods for a given audio and k.
 Use silence replacement while preserving original audio length.
 Measure confidence drop for the original predicted class, not necessarily the new predicted class.
-Random intervals must have the same total duration as the explanation intervals.
-Bottom-relevance intervals must also have the same total duration.
+Random intervals must have the same total duration X as the SpeechXAI top-k word intervals.
+Optional bottom-relevance intervals must also use the same duration X.
 
 Main research question:
 Which explanation method is more faithful to the classifier’s prediction under deletion-based evaluation: SpeechXAI or the LeGrad-inspired temporal attribution method?
 
 Expected final claim:
-We implemented a LeGrad-inspired temporal attribution method for wav2vec2-based speech emotion recognition and compared it with SpeechXAI on IEMOCAP. Both methods were converted to ranked time intervals and evaluated under equal-duration silence masking. A faithful explanation should produce a larger confidence drop than random or low-relevance masking.
+We implemented a LeGrad-inspired temporal attribution method for wav2vec2-based speech emotion recognition and compared it with SpeechXAI on IEMOCAP. SpeechXAI word explanations and LeGrad time-bin explanations were evaluated under equal-duration silence masking, where SpeechXAI top-k words define the shared masked duration X. A faithful explanation should produce a larger confidence drop than repeated random masking with the same X.
 
 Important limitations to mention:
 - This is LeGrad-inspired, not an exact reproduction of LeGrad.

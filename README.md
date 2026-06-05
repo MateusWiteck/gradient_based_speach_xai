@@ -8,7 +8,7 @@ The working plan is captured in [skill.md](skill.md). The repository is organize
 
 - `notebooks/`: one notebook per project phase.
 - `src/speech_xai_project/`: reusable helpers used by the notebooks.
-- `configs/default.yaml`: paths, model id, budgets, and output file names.
+- `configs/default.yaml`: paths, model id, SpeechXAI top-k values, random trials, and output file names.
 - `data/`: local audio and metadata. Raw IEMOCAP files should stay uncommitted.
 - `results/`: generated CSVs, plots, and debug artifacts.
 - `scripts/`: optional command-line runners once notebook experiments are stable.
@@ -36,6 +36,20 @@ Some dependencies, especially SpeechXAI itself, may need manual installation dep
 8. `08_qualitative_examples.ipynb`
 9. `09_final_results_summary.ipynb`
 
+## Corrected Quantitative Evaluation
+
+The deletion evaluation is driven by SpeechXAI top-k words, not fixed percentages of audio duration.
+
+For each audio and each `k` in `1, 2, 3, 5`:
+
+1. Select the top-k SpeechXAI word intervals.
+2. Compute their total duration `X`.
+3. Mask exactly those SpeechXAI word intervals.
+4. Mask LeGrad top time bins whose total duration is `X`.
+5. Mask random time bins whose total duration is `X`, repeated over multiple random trials.
+
+This is fairer because SpeechXAI is word-based while LeGrad is time-bin/token-based. The amount of removed audio is held fixed; only the selected regions differ.
+
 ## Generated Outputs
 
 The main generated files are expected to be:
@@ -46,4 +60,3 @@ The main generated files are expected to be:
 - `results/legrad_explanations.csv`
 - `results/speechxai_explanations.csv`
 - `results/deletion_results.csv`
-

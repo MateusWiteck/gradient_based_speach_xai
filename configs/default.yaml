@@ -2,7 +2,7 @@ project:
   title: LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition on IEMOCAP
 
 paths:
-  iemocap_root: data/iemocap
+  iemocap_root: data
   metadata_csv: data/metadata.csv
   results_dir: results
   predictions_csv: results/predictions.csv
@@ -16,7 +16,7 @@ model:
   sample_rate: 16000
 
 evaluation:
-  budgets: [0.1, 0.2, 0.3]
+  speechxai_top_k_values: [1, 2, 3, 5]
+  random_trials: 20
   random_seed: 13
   legrad_bin_seconds: 0.05
-
