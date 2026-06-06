@@ -14,53 +14,61 @@ class Prediction:
     probabilities: torch.Tensor
 
 
-def load_speechbrain_classifier(source: str, savedir: str | Path):
-    """Load SpeechBrain's pretrained emotion classifier.
-
-    Importing SpeechBrain lazily keeps utility imports usable before dependencies are installed.
-    """
-    import torchaudio
-
-    if not hasattr(torchaudio, "set_audio_backend"):
-        torchaudio.set_audio_backend = lambda backend: None
-    if not hasattr(torchaudio, "get_audio_backend"):
-        torchaudio.get_audio_backend = lambda: None
-    if not hasattr(torchaudio, "list_audio_backends"):
-        torchaudio.list_audio_backends = lambda: ["soundfile"]
-
-    try:
-        from speechbrain.inference.classifiers import EncoderClassifier
-        from speechbrain.utils.fetching import LocalStrategy
-    except ImportError:
-        from speechbrain.pretrained import EncoderClassifier
-        LocalStrategy = None
-
-    kwargs = {"source": source, "savedir": str(savedir)}
-    if LocalStrategy is not None:
-        kwargs["local_strategy"] = LocalStrategy.COPY
-
-    return EncoderClassifier.from_hparams(**kwargs)
+@dataclass
+class AudioClassifier:
+    network: torch.nn.Module
+    feature_extractor: object
+    sample_rate: int
+    device: torch.device
 
 
-def classify_waveform(classifier, waveform: torch.Tensor) -> Prediction:
-    """Run a SpeechBrain classifier and return a normalized prediction object."""
+def load_classifier(source: str, cache_dir: str | Path | None = None) -> AudioClassifier:
+    """Load the Hugging Face emotion classifier used by Pastor et al. (2024)."""
+    from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
+
+    resolved_cache_dir = str(cache_dir) if cache_dir is not None else None
+    feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
+        source,
+        cache_dir=resolved_cache_dir,
+    )
+    network = Wav2Vec2ForSequenceClassification.from_pretrained(
+        source,
+        cache_dir=resolved_cache_dir,
+        attn_implementation="eager",
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    network.to(device)
+    network.eval()
+    return AudioClassifier(
+        network=network,
+        feature_extractor=feature_extractor,
+        sample_rate=int(feature_extractor.sampling_rate),
+        device=device,
+    )
+
+
+def classify_waveform(classifier: AudioClassifier, waveform: torch.Tensor) -> Prediction:
+    """Classify one waveform and return probabilities in the model's label order."""
+    waveform_batch = waveform.detach().cpu().float()
+    if waveform_batch.ndim == 1:
+        waveform_batch = waveform_batch.unsqueeze(0)
+    if waveform_batch.ndim != 2 or waveform_batch.shape[0] != 1:
+        raise ValueError("classify_waveform expects one waveform shaped [samples] or [1, samples].")
+
+    inputs = classifier.feature_extractor(
+        waveform_batch.squeeze(0).numpy(),
+        sampling_rate=classifier.sample_rate,
+        return_tensors="pt",
+    )
+    model_inputs = {name: value.to(classifier.device) for name, value in inputs.items()}
+
     with torch.no_grad():
-        if hasattr(classifier.mods, "compute_features"):
-            output_probabilities, score, index, text_label = classifier.classify_batch(waveform)
-        else:
-            features = classifier.mods.wav2vec2(waveform)
-            pooled_features = classifier.mods.avg_pool(features)
-            logits = classifier.mods.output_mlp(pooled_features)
-            output_probabilities = classifier.hparams.softmax(logits).squeeze(1)
-            score, index = torch.max(output_probabilities, dim=-1)
-            text_label = classifier.hparams.label_encoder.decode_torch(index)
+        logits = classifier.network(**model_inputs).logits
+        probabilities = torch.softmax(logits, dim=-1).squeeze(0).cpu()
 
-    probabilities = output_probabilities.detach().cpu().squeeze(0)
-    predicted_index = int(index.detach().cpu().reshape(-1)[0])
-    predicted_confidence = float(score.detach().cpu().reshape(-1)[0])
-    while isinstance(text_label, list):
-        text_label = text_label[0]
-    predicted_label = str(text_label)
+    predicted_index = int(probabilities.argmax())
+    predicted_confidence = float(probabilities[predicted_index])
+    predicted_label = str(classifier.network.config.id2label[predicted_index])
     return Prediction(
         predicted_label=predicted_label,
         predicted_index=predicted_index,
@@ -69,9 +77,28 @@ def classify_waveform(classifier, waveform: torch.Tensor) -> Prediction:
     )
 
 
-def print_module_tree(model, max_depth: int = 3) -> None:
-    """Print a compact module tree for finding wav2vec2 internals."""
-    for name, module in model.named_modules():
+def prepare_model_inputs(
+    classifier: AudioClassifier,
+    waveform: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Prepare one waveform for direct forward passes through the classifier."""
+    waveform_batch = waveform.detach().cpu().float()
+    if waveform_batch.ndim == 2 and waveform_batch.shape[0] == 1:
+        waveform_batch = waveform_batch.squeeze(0)
+    if waveform_batch.ndim != 1:
+        raise ValueError("prepare_model_inputs expects one mono waveform.")
+
+    inputs = classifier.feature_extractor(
+        waveform_batch.numpy(),
+        sampling_rate=classifier.sample_rate,
+        return_tensors="pt",
+    )
+    return {name: value.to(classifier.device) for name, value in inputs.items()}
+
+
+def print_module_tree(network: torch.nn.Module, max_depth: int = 3) -> None:
+    """Print a compact module tree for locating wav2vec 2.0 internals."""
+    for name, module in network.named_modules():
         depth = 0 if not name else name.count(".") + 1
         if depth <= max_depth:
             indent = "  " * depth

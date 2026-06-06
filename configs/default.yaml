@@ -11,9 +11,19 @@ paths:
   deletion_results_csv: results/deletion_results.csv
 
 model:
-  speechbrain_source: speechbrain/emotion-recognition-wav2vec2-IEMOCAP
-  savedir: pretrained_models/emotion-recognition-wav2vec2-IEMOCAP
+  source: superb/wav2vec2-base-superb-er
+  cache_dir: pretrained_models/wav2vec2-base-superb-er
   sample_rate: 16000
+
+speechxai:
+  repository_dir: third_party/SpeechXAI
+  whisper_model: large-v2
+  language: en
+  batch_size: 2
+  cpu_compute_type: int8
+  cuda_compute_type: float16
+  mask_padding_before_seconds: 0.10
+  mask_padding_after_seconds: 0.04
 
 evaluation:
   speechxai_top_k_values: [1, 2, 3, 5]

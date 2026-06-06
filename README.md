@@ -4,6 +4,8 @@ Course-project scaffold for comparing SpeechXAI with a LeGrad-inspired temporal 
 
 The working plan is captured in [skill.md](skill.md). The repository is organized around diagnostic notebooks first, then explanation generation, masking, deletion evaluation, and final plots.
 
+The fixed classifier is [`superb/wav2vec2-base-superb-er`](https://huggingface.co/superb/wav2vec2-base-superb-er), matching the IEMOCAP model loaded by the Pastor et al. SpeechXAI implementation.
+
 ## Repository Layout
 
 - `notebooks/`: one notebook per project phase.

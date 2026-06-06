@@ -23,8 +23,28 @@ def silence_intervals(
 
 
 def total_interval_duration(intervals_table: pd.DataFrame) -> float:
+    """Return the duration covered by the union of all intervals."""
     if intervals_table.empty:
         return 0.0
-    durations = intervals_table["end"].astype(float) - intervals_table["start"].astype(float)
-    return float(durations.clip(lower=0).sum())
 
+    intervals = sorted(
+        (
+            float(row.start),
+            float(row.end),
+        )
+        for row in intervals_table.itertuples(index=False)
+        if float(row.end) > float(row.start)
+    )
+    if not intervals:
+        return 0.0
+
+    covered_seconds = 0.0
+    current_start, current_end = intervals[0]
+    for start, end in intervals[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+            continue
+        covered_seconds += current_end - current_start
+        current_start, current_end = start, end
+
+    return covered_seconds + current_end - current_start

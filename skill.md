@@ -18,14 +18,16 @@ When a notebook is created or modified for a project step, run that notebook bef
 
 Use simple, clear, incremental development. Prefer working minimal versions over complex abstractions. When there are multiple possible solutions, choose the easiest robust one.
 
+Write explanations positively and directly. Describe what a method, result, or component is and what it does. Avoid contrastive phrasing such as "it is not X" when a direct description is sufficient.
+
 Dataset:
 Use IEMOCAP. If the full dataset path is not yet configured, write the code so the path can be easily changed in one variable at the top of the notebook.
 
 Model:
-Start with the pretrained SpeechBrain model:
-speechbrain/emotion-recognition-wav2vec2-IEMOCAP
+Use the same pretrained emotion classifier as the Pastor et al. SpeechXAI paper:
+superb/wav2vec2-base-superb-er
 
-If the SpeechBrain wrapper does not expose attentions or gradients easily, test a fallback using the underlying Hugging Face wav2vec2 model or another Hugging Face-compatible IEMOCAP emotion model that exposes attentions.
+Load it with Hugging Face `Wav2Vec2ForSequenceClassification`. Keep this classifier fixed for SpeechXAI, LeGrad-inspired explanations, masking, and evaluation.
 
 Do not continue blindly if attention gradients are impossible. First create a diagnostic notebook proving whether attentions and gradients are accessible.
 
@@ -45,7 +47,7 @@ Expected notebook sequence:
 
 Notebook 01 — Model inference on IEMOCAP
 Goal:
-Load a few IEMOCAP audio samples and run inference using the pretrained SpeechBrain wav2vec2-IEMOCAP emotion model.
+Load a few IEMOCAP audio samples and run inference using the pretrained SUPERB wav2vec2-IEMOCAP emotion model used by Pastor et al.
 
 Tasks:
 - Define dataset/audio path variables.

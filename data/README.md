@@ -53,4 +53,4 @@ The metadata builder keeps the main emotion labels used by the project:
 ang, exc, hap, neu, sad
 ```
 
-For the SpeechBrain 4-class IEMOCAP model, evaluation code maps `exc` to `hap`.
+For the SUPERB 4-class IEMOCAP model used by Pastor et al., evaluation code maps `exc` to `hap`.

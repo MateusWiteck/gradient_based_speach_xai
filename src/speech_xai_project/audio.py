@@ -38,7 +38,7 @@ def duration_seconds(waveform: torch.Tensor, sample_rate: int) -> float:
 
 
 def waveform_to_batch(waveform: torch.Tensor) -> torch.Tensor:
-    """Convert [channels, samples] waveform to SpeechBrain-friendly [batch, samples]."""
+    """Convert a waveform to one mono batch shaped [1, samples]."""
     if waveform.ndim == 1:
         return waveform.unsqueeze(0)
     if waveform.shape[0] == 1:

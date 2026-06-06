@@ -13,7 +13,7 @@ from speech_xai_project import audio, config, model
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Step 1 SpeechBrain IEMOCAP inference.")
+    parser = argparse.ArgumentParser(description="Run Step 1 SUPERB IEMOCAP inference.")
     parser.add_argument("--config", default=PROJECT_ROOT / "configs" / "default.yaml")
     parser.add_argument("--limit", type=int, default=5)
     return parser.parse_args()
@@ -26,8 +26,8 @@ def main() -> int:
     iemocap_root = config.project_path(project_config["paths"]["iemocap_root"])
     metadata_csv = config.project_path(project_config["paths"]["metadata_csv"])
     predictions_csv = config.project_path(project_config["paths"]["predictions_csv"])
-    model_source = project_config["model"]["speechbrain_source"]
-    model_savedir = config.project_path(project_config["model"]["savedir"])
+    model_source = project_config["model"]["source"]
+    model_cache_dir = config.project_path(project_config["model"]["cache_dir"])
     target_sample_rate = project_config["model"]["sample_rate"]
 
     metadata_table = audio.load_metadata_or_discover(metadata_csv, iemocap_root, limit=args.limit)
@@ -39,7 +39,7 @@ def main() -> int:
         return 1
 
     predictions_csv.parent.mkdir(parents=True, exist_ok=True)
-    classifier = model.load_speechbrain_classifier(model_source, model_savedir)
+    classifier = model.load_classifier(model_source, model_cache_dir)
     prediction_rows = []
 
     for row in metadata_table.itertuples(index=False):

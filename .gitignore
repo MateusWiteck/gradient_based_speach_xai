@@ -20,6 +20,11 @@ results/*
 pretrained_models/
 wav2vec2_checkpoints/
 notebooks/wav2vec2_checkpoints/
+third_party/SpeechXAI/
+third_party/ffmpeg/
+
+references/*
+!references/*.md
 
 *.pkl
 *.pt

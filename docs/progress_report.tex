@@ -4,6 +4,7 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{longtable}
+\usepackage{tabularx}
 \usepackage{xcolor}
 
 \hypersetup{
@@ -12,177 +13,337 @@
   urlcolor=blue
 }
 
-\title{Progress Report: LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition}
+\title{Technical Project Overview\\
+\large LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition}
 \author{gradient\_based\_speach\_xai}
-\date{June 5, 2026}
+\date{June 6, 2026}
 
 \begin{document}
 \maketitle
 
-\section{Project Goal}
+\section{Project Overview}
 
-The project studies speech explainability for emotion recognition on IEMOCAP. The planned pipeline compares:
+This project compares two approaches for explaining a pretrained speech emotion recognition classifier. SpeechXAI provides human-readable explanations based on word-aligned audio segments. The proposed LeGrad-inspired method will derive temporal relevance from gradients associated with the attention mechanisms of a wav2vec 2.0 encoder. The classification task uses speech samples and emotion annotations from IEMOCAP.
+
+The quantitative evaluation uses deletion by silence masking. Important audio regions are replaced by silence while the original signal length is preserved, and the resulting confidence drop for the classifier's original predicted class is measured. The central methodological decision is to compare word-level SpeechXAI explanations with time-bin or token-level LeGrad explanations under the same total occluded duration.
+
+\section{Sources and External References}
+
+\begin{itemize}
+  \item \textbf{Dataset: IEMOCAP.} The local data follows the five-session IEMOCAP release from the USC Signal Analysis and Interpretation Laboratory. The corpus contains speech, transcripts, and categorical emotion annotations. Project source: \href{https://sail.usc.edu/iemocap/}{USC IEMOCAP website}. Dataset paper: \href{https://sail.usc.edu/iemocap/Busso_2008_iemocap.pdf}{Busso et al., ``IEMOCAP: Interactive Emotional Dyadic Motion Capture''}.
+
+  \item \textbf{Pretrained classifier.} The project uses \href{https://huggingface.co/superb/wav2vec2-base-superb-er}{\texttt{superb/wav2vec2-base-superb-er}}, the Hugging Face wav2vec 2.0 emotion-recognition checkpoint loaded by the SpeechXAI repository for IEMOCAP. The model exposes four output classes: anger, happiness/excitement, neutral, and sadness.
+
+  \item \textbf{wav2vec 2.0.} The encoder architecture originates from Baevski et al., \href{https://arxiv.org/abs/2006.11477}{``wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations''}.
+
+  \item \textbf{SUPERB.} The active checkpoint follows the SUPERB speech-processing benchmark described by Yang et al., \href{https://arxiv.org/abs/2105.01051}{``SUPERB: Speech Processing Universal PERformance Benchmark''}.
+
+  \item \textbf{SpeechXAI.} The word-level explanation method follows Pastor et al., \href{https://aclanthology.org/2024.eacl-long.136/}{``Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features,'' EACL 2024}. Repository: \href{https://github.com/elianap/SpeechXAI}{elianap/SpeechXAI}.
+
+  \item \textbf{LeGrad.} The proposed temporal method is inspired by Bousselham et al., \href{https://arxiv.org/abs/2404.03214}{``LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity''}. Repository: \href{https://github.com/WalBouss/LeGrad}{WalBouss/LeGrad}.
+\end{itemize}
+
+The current project configuration uses IEMOCAP. No separate YAMLCap dataset source is configured.
+
+\section{Notebook-by-Notebook Technical Overview}
+
+\subsection{Notebook 01 --- SpeechXAI Word Attribution on One IEMOCAP Audio}
+
+\subsubsection*{Purpose}
+Establish a complete SpeechXAI explanation and deletion-evaluation workflow on one IEMOCAP utterance before integrating the LeGrad-inspired method.
+
+\subsubsection*{Technical idea}
+SpeechXAI uses WhisperX to transcribe the utterance and align each word with its actual start and end time. The same timestamp objects are passed into SpeechXAI's leave-one-out explainer, ensuring that each attribution score refers to the word interval shown in the visualization. SpeechXAI measures importance as the confidence change caused by replacing a word region with silence.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item A pretrained wav2vec 2.0 emotion classifier is used so the project can focus on explanation quality rather than classifier training.
+  \item One utterance is used to keep this notebook focused on the explanation workflow and visualization.
+  \item The original predicted class is the attribution and deletion target.
+  \item Silence replacement preserves the waveform length.
+  \item SpeechXAI's WhisperX transcription is the only source of word text and timing; no character-based or uniform timing approximation is used.
+  \item Transcription is performed once, and the returned word segments are reused by the explainer and plot so words, timestamps, and scores remain index-aligned.
+  \item WhisperX's per-word transcription confidence is retained in the attribution table so uncertain alignments remain visible during interpretation.
+  \item The visualization distinguishes the lexical word interval from SpeechXAI's effective mask, which extends 100\,ms before and 40\,ms after each word.
+  \item Attribution bars use SpeechXAI's raw confidence-drop values. They are not rescaled to make the largest word equal to one, because that would hide the magnitude of the model response.
+  \item The waveform-loading path used by the project is checked against SpeechXAI's pydub-loading path. Both must produce the same predicted class and probability vector before the explanation is accepted.
+  \item Word intervals must be chronological, have positive duration, remain inside the audio, and correspond one-to-one with SpeechXAI's returned features and scores.
+  \item The notebook rejects an utterance when its first aligned word begins before SpeechXAI's 100\,ms pre-word padding. The upstream removal function does not clamp this slice at zero, so accepting such an example could make the displayed mask differ from the perturbation actually evaluated.
+  \item The final evaluation uses the top-$k$ SpeechXAI words to define the shared masking duration.
+  \item Overlapping padded masks are counted by their union duration so the audio-removal budget is not inflated.
+  \item Notebook 01 writes no result files; all results remain visible in the executed notebook.
+\end{itemize}
+
+\subsubsection*{What was tested}
+The selected audio was loaded and classified, then transcribed and aligned with SpeechXAI's WhisperX function. The returned segments were passed directly into SpeechXAI's leave-one-out explainer and checked against the returned feature order. Timestamp validity, word-score alignment, and the 100\,ms first-word safety condition were validated. The original prediction obtained from SpeechXAI's pydub representation matched the prediction obtained from the waveform shown in the notebook. The visualization used real word locations, effective silence masks, raw confidence-drop attribution values, and per-word transcription confidence. Top-$k$ SpeechXAI deletion was compared with repeated random masking using the same union duration.
+
+\subsubsection*{Outcome}
+The notebook executed successfully for utterance \texttt{Ses01F\_impro01\_F005}. WhisperX located the first word at 0.594 seconds, preserving the initial silence and later pauses. The returned word-confidence values ranged from 0.760 to 0.980. The classifier predicted anger with confidence 0.8781. SpeechXAI assigned the largest raw confidence drop, 0.4218, to ``what's''. The visualization, attribution table, consistency checks, and shared-duration evaluation all completed successfully.
+
+\subsubsection*{Remaining issues}
+The current validation covers one utterance only. WhisperX confidence is useful diagnostic information but is not a guarantee that every boundary is correct. Utterances with a word beginning inside the first 100\,ms are currently rejected because of the upstream SpeechXAI slicing behavior; supporting them safely would require clamping the library's perturbation boundary. The pipeline must be run on a controlled multi-audio set before drawing comparative conclusions.
+
+\subsection{Notebook 02 --- Attention Access Test}
+
+\subsubsection*{Purpose}
+Determine whether the wav2vec 2.0 Transformer attention maps required by the LeGrad-inspired method are accessible.
+
+\subsubsection*{Technical idea}
+The active classifier is a Hugging Face \texttt{Wav2Vec2ForSequenceClassification} model. The diagnostic step requests attention outputs directly from its Transformer encoder and inspects their dimensions and numerical behavior.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item Attention access is treated as a required checkpoint before developing LeGrad.
+  \item The Hugging Face classifier is accessed directly, matching the model-loading path used by SpeechXAI.
+  \item Attention tensors should be inspected across layers and heads and visualized for at least one layer-head pair.
+\end{itemize}
+
+\subsubsection*{What was tested}
+The configured SUPERB classifier was run on the same IEMOCAP utterance used in Notebook 01 with attention output enabled. The notebook inspected every returned layer, validated finite values, printed tensor dimensions, and visualized one final-layer attention head.
+
+\subsubsection*{Outcome}
+Attention access succeeded. The model returned 12 attention tensors, one per Transformer layer, each shaped \texttt{[1, 12, 201, 201]} for the selected utterance.
+
+\subsubsection*{Remaining issues}
+Notebook 03 must confirm that these returned attention tensors retain usable, nonzero gradients for the original predicted-class logit.
+
+\subsection{Notebook 03 --- Attention Gradient Test}
+
+\subsubsection*{Purpose}
+Verify that gradients of a target class score with respect to Transformer attention maps can be obtained.
+
+\subsubsection*{Technical idea}
+LeGrad uses sensitivity to attention maps as its explanation signal. For speech, the target quantity is the classifier score for the original predicted emotion, and the required diagnostic is $\partial s_{\hat{y}}/\partial A_l$ for one or more Transformer layers.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item The target is the original predicted-class logit or score.
+  \item Returned attention tensors will retain gradients during backpropagation.
+  \item Gradient shape, magnitude, finite values, and nonzero proportion will be checked before attribution aggregation.
+  \item Logits are preferred over probabilities when probability saturation weakens gradients.
+\end{itemize}
+
+\subsubsection*{What was tested}
+The notebook scaffold and reusable gradient-retention utilities are present.
+
+\subsubsection*{Outcome}
+The conceptual gradient path is defined. A real model forward and backward pass remains to be validated after Notebook 02 succeeds.
+
+\subsubsection*{Remaining issues}
+Gradient availability depends on how the wav2vec 2.0 attention implementation returns intermediate tensors. Hooks may be required if returned attentions are detached from the computational graph.
+
+\subsection{Notebook 04 --- LeGrad-Inspired Temporal Explanation}
+
+\subsubsection*{Purpose}
+Convert attention-gradient information into a temporal relevance signal over the speech utterance.
+
+\subsubsection*{Technical idea}
+For each Transformer layer, positive class-sensitive attention gradients are combined with attention activations, averaged across heads, aggregated across layers, and reduced from a token-token matrix to token relevance. Token relevance is then mapped to audio time.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item The method is presented as LeGrad-inspired because it adapts the central attention-gradient principle from vision to speech.
+  \item Relevance uses positive gradients multiplied by attention values.
+  \item Head and layer aggregation use simple means for interpretability and reproducibility.
+  \item Temporal outputs use small fixed-duration bins or token intervals that can participate in duration-matched deletion evaluation.
+\end{itemize}
+
+\subsubsection*{What was tested}
+Reusable aggregation and token-to-time utilities have been prepared.
+
+\subsubsection*{Outcome}
+The representation and output format are defined. Real relevance curves depend on successful attention-gradient extraction in Notebook 03.
+
+\subsubsection*{Remaining issues}
+The reduction direction of the token-token relevance matrix must be selected empirically and kept fixed. Temporal mapping must also account for the wav2vec 2.0 feature encoder stride.
+
+\subsection{Notebook 05 --- SpeechXAI Explanations}
+
+\subsubsection*{Purpose}
+Generate word-level explanation intervals for the same classifier inputs used by the LeGrad-inspired method.
+
+\subsubsection*{Technical idea}
+SpeechXAI aligns speech with transcript words and measures the effect of perturbing each word-level audio segment. The quantitative comparison will use word identity, timestamps, and importance scores.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item Word-level explanations are the primary SpeechXAI output for quantitative comparison.
+  \item Paralinguistic explanations remain available for qualitative analysis after the main word-level pipeline is stable.
+  \item SpeechXAI output will use the common columns \texttt{audio\_id}, \texttt{word}, \texttt{start}, \texttt{end}, and \texttt{score}.
+  \item The same audio and original predicted class will be used across explanation methods.
+\end{itemize}
+
+\subsubsection*{What was tested}
+Notebook 01 ran SpeechXAI's WhisperX alignment and leave-one-out explainer on one IEMOCAP utterance using the same SUPERB classifier selected for the project.
+
+\subsubsection*{Outcome}
+The single-audio SpeechXAI integration is operational. Real word timestamps, effective mask intervals, and attribution scores are available in the shared interval representation.
+
+\subsubsection*{Remaining issues}
+Notebook 05 should extend the validated single-audio workflow to the controlled evaluation set and define how transcription and explanations are cached for repeatable dataset-scale runs.
+
+\subsection{Notebook 06 --- Unified Interval Representation and Masking}
+
+\subsubsection*{Purpose}
+Provide a shared representation and masking protocol for word intervals, LeGrad time bins, and random baselines.
+
+\subsubsection*{Technical idea}
+SpeechXAI top-$k$ words define a duration $X$. LeGrad and random selections are then constrained to the same total duration. All selected regions are replaced by silence without changing sample count.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item SpeechXAI is the source of the shared duration because its native explanation unit is a word.
+  \item LeGrad regions are ranked time bins selected until duration $X$ is reached.
+  \item Random selections use the same bin resolution and duration $X$.
+  \item The last selected bin may be clipped to match $X$ closely.
+  \item Primary conditions are SpeechXAI-top, LeGrad-top, and Random.
+\end{itemize}
+
+\subsubsection*{What was tested}
+Duration-based interval selection, top-$k$ selection, random interval sampling, silence masking, and union-duration accounting were tested. Notebook 01 matched the effective SpeechXAI and random mask durations for every evaluated $k$.
+
+\subsubsection*{Outcome}
+The corrected duration-matching logic is available and the notebook scaffold executes successfully.
+
+\subsubsection*{Remaining issues}
+The full comparison still requires LeGrad explanation intervals for the same utterances.
+
+\subsection{Notebook 07 --- Deletion Evaluation}
+
+\subsubsection*{Purpose}
+Measure explanation faithfulness under the shared-duration masking protocol.
+
+\subsubsection*{Technical idea}
+For every audio and top-$k$ setting, the classifier confidence for the original predicted class is measured before and after masking. A faithful selection should remove regions that cause a larger confidence drop than same-duration random regions.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item Top-$k$ values are $1$, $2$, $3$, and $5$.
+  \item The main metric is absolute confidence drop for the original predicted class.
+  \item Relative confidence drop and prediction flip rate are secondary metrics.
+  \item Random masking is repeated 20 times to estimate its mean and variability.
+  \item Each result records $k$, method, actual masked duration, original confidence, masked confidence, confidence drop, relative drop, flip state, and random-trial index.
+\end{itemize}
+
+\subsubsection*{What was tested}
+Notebook 01 validated the evaluation logic on one utterance using real SpeechXAI leave-one-out importance and repeated random masking. Notebook 07 currently executes as a protocol scaffold.
+
+\subsubsection*{Outcome}
+The evaluation schema and fairness constraints are defined and validated at baseline scale.
+
+\subsubsection*{Remaining issues}
+The complete comparison requires SpeechXAI and LeGrad explanations across a controlled multi-audio evaluation set.
+
+\subsection{Notebook 08 --- Qualitative Examples}
+
+\subsubsection*{Purpose}
+Create interpretable examples that show where SpeechXAI and LeGrad agree or disagree and how masking changes model confidence.
+
+\subsubsection*{Technical idea}
+Each example combines the waveform, word-level SpeechXAI intervals, the LeGrad temporal relevance curve, selected masking regions, and before/after classifier confidence.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item Examples will be selected from quantitative outcomes rather than chosen only for visual appeal.
+  \item The final set should include agreement, LeGrad-favored, SpeechXAI-favored, and difficult cases.
+  \item Interpretations will distinguish model faithfulness from human plausibility.
+\end{itemize}
+
+\subsubsection*{What was tested}
+The notebook structure and plotting requirements have been defined.
+
+\subsubsection*{Outcome}
+The qualitative analysis plan is ready.
+
+\subsubsection*{Remaining issues}
+Representative cases can be selected after Notebook 07 produces full deletion results.
+
+\subsection{Notebook 09 --- Final Results Summary}
+
+\subsubsection*{Purpose}
+Aggregate deletion outcomes into the tables and plots used to answer the main research question.
+
+\subsubsection*{Technical idea}
+Results are grouped by method and SpeechXAI top-$k$ value. The analysis reports confidence-drop statistics together with mean masked duration, ensuring that interpretation includes the actual amount of removed speech.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item The horizontal axis of the deletion curve is SpeechXAI top-$k$, rather than an arbitrary audio-percentage budget.
+  \item Random trials are summarized by their mean and standard deviation.
+  \item Mean masked duration is reported for every $k$.
+  \item Optional class-wise analysis will be added if the final sample size supports it.
+\end{itemize}
+
+\subsubsection*{What was tested}
+The notebook executes and handles the current absence of full deletion results gracefully.
+
+\subsubsection*{Outcome}
+The aggregation schema and plot definitions reflect the corrected evaluation design.
+
+\subsubsection*{Remaining issues}
+Final tables and plots require completed SpeechXAI and LeGrad runs.
+
+\section{Evaluation Design}
+
+The final quantitative evaluation follows these steps:
 
 \begin{enumerate}
-  \item SpeechXAI segment-level explanations.
-  \item A LeGrad-inspired temporal attribution method based on gradients with respect to Transformer attention maps.
+  \item SpeechXAI returns importance scores for word-aligned audio segments.
+  \item For each audio and each $k \in \{1,2,3,5\}$, the top-$k$ SpeechXAI words are selected.
+  \item The selected words define a total duration $X$ seconds.
+  \item Those SpeechXAI word intervals are replaced by silence, and the confidence drop for the original predicted class is measured.
+  \item LeGrad time bins are ranked by relevance, and the highest-ranked bins whose total duration equals $X$ are selected.
+  \item Those LeGrad regions are replaced by silence, and the same confidence drop is measured.
+  \item Random time bins with total duration $X$ are selected repeatedly to form a stable random baseline.
+  \item All methods use the same audio, classifier, target class, masking operation, and removed duration.
 \end{enumerate}
 
-Both methods will be converted to ranked time intervals in seconds and evaluated using the same deletion protocol. For each audio sample, selected regions are replaced by silence while preserving the original audio length. The main metric is the confidence drop for the original predicted class:
+SpeechXAI naturally explains words, while the LeGrad-inspired method explains Transformer time bins or tokens. Equalizing the total occluded duration makes the comparison focus on where each method assigns relevance.
+
+The main metric is:
 
 \[
-\mathrm{drop} = p_{\mathrm{original}}(\hat{y}) - p_{\mathrm{masked}}(\hat{y}).
+\mathrm{drop}
+= p_{\mathrm{original}}(\hat{y})
+- p_{\mathrm{masked}}(\hat{y}),
 \]
 
-\section{Repository Setup Completed}
+where $\hat{y}$ is the class predicted from the original audio. Secondary metrics are relative confidence drop and prediction flip rate. Mean masked duration is reported for every top-$k$ setting.
 
-The repository has been scaffolded around the diagnostic-first workflow described in \texttt{skill.md}. The main additions are:
+\section{Methodological Decisions Summary}
 
-\begin{itemize}
-  \item \texttt{README.md}: project overview, setup instructions, notebook order, and expected outputs.
-  \item \texttt{pyproject.toml}: editable-install package metadata and dependencies.
-  \item \texttt{configs/default.yaml}: model name, paths, sample rate, SpeechXAI top-k values, random trials, and output file names.
-  \item \texttt{data/README.md}: expected local IEMOCAP metadata format.
-  \item \texttt{results/README.md}: placeholder for generated outputs.
-  \item \texttt{src/speech\_xai\_project/}: reusable project helpers.
-  \item \texttt{scripts/}: command-line runners for stable notebook logic.
-  \item \texttt{notebooks/01} through \texttt{notebooks/09}: one notebook per project phase.
-\end{itemize}
-
-\section{Reusable Code Added}
-
-The helper package \texttt{speech\_xai\_project} currently contains:
-
-\begin{longtable}{ll}
+\begin{longtable}{p{0.20\textwidth} p{0.34\textwidth} p{0.38\textwidth}}
 \toprule
-\textbf{File} & \textbf{Purpose} \\
+\textbf{Component} & \textbf{Decision} & \textbf{Reason} \\
 \midrule
-\texttt{audio.py} & Audio loading, resampling, duration calculation, metadata discovery. \\
-\texttt{config.py} & YAML config loading and project-relative path resolution. \\
-\texttt{model.py} & SpeechBrain classifier loading and waveform classification helpers. \\
-\texttt{intervals.py} & Score normalization, interval selection, random intervals, token-to-time conversion. \\
-\texttt{masking.py} & Silence masking and total masked-duration calculation. \\
-\texttt{legrad.py} & LeGrad-inspired attention-gradient relevance aggregation. \\
-\texttt{evaluation.py} & Confidence-drop and deletion-result data structures. \\
-\texttt{plotting.py} & Waveform plotting and interval highlighting helpers. \\
+Dataset & IEMOCAP speech, transcripts, and emotion labels & It is a standard speech emotion resource and provides the audio and annotations required by the selected classifier. \\
+
+Classifier & SUPERB \texttt{wav2vec2-base-superb-er} checkpoint used by SpeechXAI & Using the same classifier removes model choice as a confound when comparing SpeechXAI and LeGrad-inspired explanations. \\
+
+Model label space & Anger, happiness/excitement, neutral, sadness & These are the four outputs supported by the selected pretrained classifier. \\
+
+Target class & Original predicted class & Faithfulness is evaluated relative to the model decision being explained. \\
+
+SpeechXAI unit & Word-aligned audio segments & This is SpeechXAI's native, human-readable explanation unit. \\
+
+LeGrad unit & Transformer tokens or fixed temporal bins & Attention-gradient relevance is naturally produced at the encoder-token level. \\
+
+LeGrad formulation & Positive attention gradients combined with attention values, aggregated across heads and layers & This preserves the central LeGrad idea while adapting its output to speech time. \\
+
+Shared duration & $X$ seconds from SpeechXAI top-$k$ words & This makes word-level and time-bin explanations comparable under equal audio removal. \\
+
+Top-$k$ values & $1$, $2$, $3$, and $5$ words & These settings provide a compact deletion curve while respecting SpeechXAI's native output. \\
+
+Masking method & Silence replacement with unchanged waveform length & It provides a simple perturbation and avoids duration changes that could independently affect the classifier. \\
+
+Random baseline & Same-duration random bins, repeated 20 times & Repetition estimates baseline variance and provides a stable reference. \\
+
+Main metric & Confidence drop for the original predicted class & It measures how strongly the selected regions support the model's original decision. \\
+
+Secondary metrics & Relative confidence drop and prediction flip rate & They complement absolute confidence drop across samples with different confidence levels. \\
+
+Notebook 01 scope & One utterance, in-memory outputs & It establishes an understandable baseline and avoids mixing pipeline validation with dataset-scale evaluation. \\
 \bottomrule
 \end{longtable}
-
-\section{Notebook Plan Created}
-
-Nine notebooks were created to match the intended implementation order:
-
-\begin{enumerate}
-  \item \texttt{01\_inference\_iemocap.ipynb}: model inference on IEMOCAP.
-  \item \texttt{02\_attention\_access\_test.ipynb}: attention map access diagnostics.
-  \item \texttt{03\_attention\_gradient\_test.ipynb}: attention-gradient diagnostics.
-  \item \texttt{04\_legrad\_temporal\_explanation.ipynb}: LeGrad-inspired relevance intervals.
-  \item \texttt{05\_speechxai\_explanations.ipynb}: SpeechXAI segment explanations.
-  \item \texttt{06\_unified\_interval\_masking.ipynb}: common interval format and silence masking.
-  \item \texttt{07\_deletion\_evaluation.ipynb}: confidence-drop evaluation.
-  \item \texttt{08\_qualitative\_examples.ipynb}: report-ready qualitative examples.
-  \item \texttt{09\_final\_results\_summary.ipynb}: final tables and plots.
-\end{enumerate}
-
-\section{Step 1 Work Completed}
-
-Step 1 is the classifier inference phase. The following work has been done:
-
-\begin{itemize}
-  \item \texttt{01\_inference\_iemocap.ipynb} was updated to load metadata from \texttt{data/metadata.csv} when available.
-  \item If no metadata file exists, the notebook discovers audio files under \texttt{data/iemocap}.
-  \item The notebook now raises a clear error when no audio is available instead of failing later at an unclear indexing operation.
-  \item \texttt{scripts/run\_inference.py} was added as a command-line equivalent of the Step 1 inference workflow.
-  \item The runner writes \texttt{results/predictions.csv} once IEMOCAP audio and required dependencies are available.
-\end{itemize}
-
-The expected metadata format is:
-
-\begin{verbatim}
-audio_id,audio_path,true_label
-Ses01F_impro01_F000,data/iemocap/path/to/file.wav,neutral
-\end{verbatim}
-
-
-\section{Corrected Quantitative Evaluation}
-
-The quantitative deletion protocol was updated after the initial scaffold. The old fixed-percentage masking budgets are no longer the project protocol. Because SpeechXAI naturally produces word-level explanations, SpeechXAI now defines the masking duration.
-
-For each audio sample and each $k \in \{1,2,3,5\}$, the top-$k$ SpeechXAI words are selected and their total duration $X$ is computed. SpeechXAI masks exactly those word intervals. LeGrad masks its highest-scoring time bins whose total duration equals $X$. The random baseline masks random time bins with the same total duration $X$, repeated over multiple random trials. This keeps the classifier, audio sample, masking operation, and amount of removed audio fixed across methods; only the selected regions differ.
-
-The deletion-results table should therefore include:
-
-\begin{verbatim}
-audio_id, k, method, masked_duration, original_label,
-original_confidence, masked_confidence, drop, relative_drop,
-prediction_flipped, random_trial
-\end{verbatim}
-
-\section{Notebook Execution Results}
-
-The notebooks were executed using:
-
-\begin{verbatim}
-python -m nbconvert --to notebook --execute --inplace
-  --ExecutePreprocessor.timeout=300
-  --ExecutePreprocessor.kernel_name=python3 <notebook>
-\end{verbatim}
-
-The command \texttt{jupyter nbconvert} was not available as a command shim, but \texttt{python -m nbconvert} worked.
-
-\begin{longtable}{lll}
-\toprule
-\textbf{Notebook} & \textbf{Result} & \textbf{Reason or Notes} \\
-\midrule
-\texttt{01\_inference\_iemocap.ipynb} & Failed & No IEMOCAP audio or \texttt{data/metadata.csv}. \\
-\texttt{02\_attention\_access\_test.ipynb} & Failed & \texttt{speechbrain} is not installed. \\
-\texttt{03\_attention\_gradient\_test.ipynb} & Passed & Placeholder diagnostic notebook executed. \\
-\texttt{04\_legrad\_temporal\_explanation.ipynb} & Passed & Placeholder explanation notebook executed. \\
-\texttt{05\_speechxai\_explanations.ipynb} & Passed & Placeholder SpeechXAI notebook executed. \\
-\texttt{06\_unified\_interval\_masking.ipynb} & Passed & Placeholder masking notebook executed. \\
-\texttt{07\_deletion\_evaluation.ipynb} & Passed & Placeholder evaluation notebook executed. \\
-\texttt{08\_qualitative\_examples.ipynb} & Passed & Placeholder qualitative notebook executed. \\
-\texttt{09\_final\_results\_summary.ipynb} & Failed & \texttt{results/deletion\_results.csv} does not exist yet. \\
-\bottomrule
-\end{longtable}
-
-\section{Validation Already Run}
-
-The following validation checks have been run:
-
-\begin{itemize}
-  \item Python compilation for \texttt{src} and \texttt{scripts}.
-  \item JSON parsing for all nine notebooks.
-  \item Notebook execution via \texttt{python -m nbconvert}.
-  \item Step 1 smoke test with \texttt{python scripts\textbackslash run\_inference.py --limit 1}.
-\end{itemize}
-
-The Step 1 smoke test reached the intended data blocker and reported that no audio files were found under \texttt{data/iemocap} and no \texttt{data/metadata.csv} was present.
-
-\section{Current Blockers}
-
-Real experimental progress is currently blocked by missing local resources and dependencies:
-
-\begin{itemize}
-  \item \texttt{torchaudio} is not installed.
-  \item \texttt{speechbrain} is not installed.
-  \item No IEMOCAP audio is present under \texttt{data/iemocap}.
-  \item No \texttt{data/metadata.csv} exists.
-  \item \texttt{results/deletion\_results.csv} cannot exist until inference, explanations, masking, and deletion evaluation have run on real audio.
-\end{itemize}
-
-\section{Next Steps}
-
-\begin{enumerate}
-  \item Install project dependencies, especially \texttt{torchaudio} and \texttt{speechbrain}.
-  \item Add IEMOCAP audio under \texttt{data/iemocap} or create \texttt{data/metadata.csv}.
-  \item Re-run \texttt{01\_inference\_iemocap.ipynb} and confirm that \texttt{results/predictions.csv} is generated.
-  \item Re-run \texttt{02\_attention\_access\_test.ipynb} and identify where the wav2vec2 encoder lives inside the SpeechBrain wrapper.
-  \item Only after attention maps and attention gradients are confirmed, implement the full LeGrad-inspired explanation notebook.
-\end{enumerate}
-
-\section{Development Rule Added}
-
-The project behavior in \texttt{skill.md} was updated so that each notebook created or modified for a project step must be executed before the step is considered complete. If execution is blocked by missing data, dependencies, or credentials, the blocker and failed command must be reported explicitly.
 
 \end{document}
