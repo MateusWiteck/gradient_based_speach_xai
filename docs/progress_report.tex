@@ -16,7 +16,7 @@
 \title{Technical Project Overview\\
 \large LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition}
 \author{gradient\_based\_speach\_xai}
-\date{June 6, 2026}
+\date{June 7, 2026}
 
 \begin{document}
 \maketitle
@@ -40,6 +40,8 @@ The quantitative evaluation uses deletion by silence masking. Important audio re
 
   \item \textbf{SpeechXAI.} The word-level explanation method follows Pastor et al., \href{https://aclanthology.org/2024.eacl-long.136/}{``Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features,'' EACL 2024}. Repository: \href{https://github.com/elianap/SpeechXAI}{elianap/SpeechXAI}.
 
+  \item \textbf{WhisperX alignment.} SpeechXAI obtains word timestamps with Bain et al., \href{https://www.isca-archive.org/interspeech_2023/bain23_interspeech.html}{``WhisperX: Time-Accurate Speech Transcription of Long-Form Audio,'' Interspeech 2023}. WhisperX combines VAD-guided segmentation, Whisper transcription, and external phoneme alignment.
+
   \item \textbf{LeGrad.} The proposed temporal method is inspired by Bousselham et al., \href{https://arxiv.org/abs/2404.03214}{``LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity''}. Repository: \href{https://github.com/WalBouss/LeGrad}{WalBouss/LeGrad}.
 \end{itemize}
 
@@ -47,13 +49,13 @@ The current project configuration uses IEMOCAP. No separate YAMLCap dataset sour
 
 \section{Notebook-by-Notebook Technical Overview}
 
-\subsection{Notebook 01 --- SpeechXAI Word Attribution on One IEMOCAP Audio}
+\subsection{Notebook 01 --- SpeechXAI Single Example}
 
 \subsubsection*{Purpose}
 Establish a complete SpeechXAI explanation and deletion-evaluation workflow on one IEMOCAP utterance before integrating the LeGrad-inspired method.
 
 \subsubsection*{Technical idea}
-SpeechXAI uses WhisperX to transcribe the utterance and align each word with its actual start and end time. The same timestamp objects are passed into SpeechXAI's leave-one-out explainer, ensuring that each attribution score refers to the word interval shown in the visualization. SpeechXAI measures importance as the confidence change caused by replacing a word region with silence.
+SpeechXAI uses WhisperX to transcribe the utterance and align each word with its actual start and end time. The same timestamp objects are passed into SpeechXAI's leave-one-out explainer, ensuring that each attribution score refers to the word interval shown in the visualization. SpeechXAI measures importance as the confidence change caused by replacing a word region with silence. The paper describes zeroing the samples inside the WhisperX word interval. The released repository silences a larger interval: it starts 100\,ms before the WhisperX word start and ends 40\,ms after the WhisperX word end. Thus, the attribution assigned to one word is calculated after silencing the word together with these adjacent audio samples.
 
 \subsubsection*{Decisions made}
 \begin{itemize}
@@ -64,24 +66,29 @@ SpeechXAI uses WhisperX to transcribe the utterance and align each word with its
   \item SpeechXAI's WhisperX transcription is the only source of word text and timing; no character-based or uniform timing approximation is used.
   \item Transcription is performed once, and the returned word segments are reused by the explainer and plot so words, timestamps, and scores remain index-aligned.
   \item WhisperX's per-word transcription confidence is retained in the attribution table so uncertain alignments remain visible during interpretation.
-  \item The visualization distinguishes the lexical word interval from SpeechXAI's effective mask, which extends 100\,ms before and 40\,ms after each word.
+  \item The paper's Section 2.1 and Appendix B.1 describe zeroing word segments derived from WhisperX timestamps to preserve the original recording length. They do not specify temporal padding around those segments.
+  \item The released repository's \texttt{utils\_removal.py} defines \texttt{a=100} and \texttt{b=40}. For a WhisperX word interval $[t_{\mathrm{start}},t_{\mathrm{end}}]$, \texttt{remove\_word} and \texttt{remove\_specified\_words} silence $[t_{\mathrm{start}}-100\,\mathrm{ms},t_{\mathrm{end}}+40\,\mathrm{ms}]$.
+  \item The notebook reproduces the repository implementation rather than silently replacing it with the paper-level interval description.
+  \item The visualization distinguishes two regions: the lexical interval reported by WhisperX and the larger interval actually silenced by the repository.
+  \item A separate overlap diagnostic displays every effective mask on its own row and computes sample-level mask depth. Regions covered by two or more masks are highlighted explicitly.
   \item Attribution bars use SpeechXAI's raw confidence-drop values. They are not rescaled to make the largest word equal to one, because that would hide the magnitude of the model response.
   \item The waveform-loading path used by the project is checked against SpeechXAI's pydub-loading path. Both must produce the same predicted class and probability vector before the explanation is accepted.
   \item Word intervals must be chronological, have positive duration, remain inside the audio, and correspond one-to-one with SpeechXAI's returned features and scores.
   \item The notebook rejects an utterance when its first aligned word begins before SpeechXAI's 100\,ms pre-word padding. The upstream removal function does not clamp this slice at zero, so accepting such an example could make the displayed mask differ from the perturbation actually evaluated.
   \item The final evaluation uses the top-$k$ SpeechXAI words to define the shared masking duration.
   \item Overlapping padded masks are counted by their union duration so the audio-removal budget is not inflated.
+  \item The notebook links the upstream implementation modules beside the attribution code. The LOO explainer calls single-word removal, the removal utility performs waveform replacement, and the faithfulness evaluator invokes multi-word removal. The linked files are \path{loo_speech_explainer.py}, \path{utils_removal.py}, and \path{faithfulness_measures_speech.py}.
   \item Notebook 01 writes no result files; all results remain visible in the executed notebook.
 \end{itemize}
 
 \subsubsection*{What was tested}
-The selected audio was loaded and classified, then transcribed and aligned with SpeechXAI's WhisperX function. The returned segments were passed directly into SpeechXAI's leave-one-out explainer and checked against the returned feature order. Timestamp validity, word-score alignment, and the 100\,ms first-word safety condition were validated. The original prediction obtained from SpeechXAI's pydub representation matched the prediction obtained from the waveform shown in the notebook. The visualization used real word locations, effective silence masks, raw confidence-drop attribution values, and per-word transcription confidence. Top-$k$ SpeechXAI deletion was compared with repeated random masking using the same union duration.
+The selected audio was loaded and classified, then transcribed and aligned with SpeechXAI's WhisperX function. The returned segments were passed directly into SpeechXAI's leave-one-out explainer and checked against the returned feature order. Timestamp validity, word-score alignment, and the 100\,ms first-word safety condition were validated. The original prediction obtained from SpeechXAI's pydub representation matched the prediction obtained from the waveform shown in the notebook. The first visualization used real word locations, effective silence masks, raw confidence-drop attribution values, and per-word transcription confidence. The second visualization inspected padded removal intervals and computed overlap depth at waveform-sample resolution. Top-$k$ SpeechXAI deletion was compared with repeated random masking using the same union duration.
 
 \subsubsection*{Outcome}
-The notebook executed successfully for utterance \texttt{Ses01F\_impro01\_F005}. WhisperX located the first word at 0.594 seconds, preserving the initial silence and later pauses. The returned word-confidence values ranged from 0.760 to 0.980. The classifier predicted anger with confidence 0.8781. SpeechXAI assigned the largest raw confidence drop, 0.4218, to ``what's''. The visualization, attribution table, consistency checks, and shared-duration evaluation all completed successfully.
+The notebook executed successfully for utterance \texttt{Ses01F\_impro01\_F005}. WhisperX located the first word at 0.594 seconds, preserving the initial silence and later pauses. The returned word-confidence values ranged from 0.760 to 0.980. The classifier predicted anger with confidence 0.8781. SpeechXAI assigned the largest raw confidence drop, 0.4218, to ``what's''. The overlap diagnostic found six distinct regions covered by multiple padded masks, with a maximum depth of two simultaneous masks. The visualizations, attribution table, consistency checks, and shared-duration evaluation all completed successfully.
 
 \subsubsection*{Remaining issues}
-The current validation covers one utterance only. WhisperX confidence is useful diagnostic information but is not a guarantee that every boundary is correct. Utterances with a word beginning inside the first 100\,ms are currently rejected because of the upstream SpeechXAI slicing behavior; supporting them safely would require clamping the library's perturbation boundary. The pipeline must be run on a controlled multi-audio set before drawing comparative conclusions.
+The current validation covers one utterance only. WhisperX confidence is useful diagnostic information but is not a guarantee that every boundary is correct. The 100/40\,ms expansion is present in the released Python code but is not documented in the paper, so future experiments should state explicitly whether they reproduce the repository behavior or use unpadded paper-level word intervals. Utterances with a word beginning inside the first 100\,ms are currently rejected because of the upstream SpeechXAI slicing behavior; supporting them safely would require clamping the library's perturbation boundary. The pipeline must be run on a controlled multi-audio set before drawing comparative conclusions.
 
 \subsection{Notebook 02 --- Attention Access Test}
 
@@ -157,84 +164,38 @@ The representation and output format are defined. Real relevance curves depend o
 \subsubsection*{Remaining issues}
 The reduction direction of the token-token relevance matrix must be selected empirically and kept fixed. Temporal mapping must also account for the wav2vec 2.0 feature encoder stride.
 
-\subsection{Notebook 05 --- SpeechXAI Explanations}
+\subsection{Notebook 05 --- Quantitative Evaluation}
 
 \subsubsection*{Purpose}
-Generate word-level explanation intervals for the same classifier inputs used by the LeGrad-inspired method.
+Run the complete multi-audio comparison in one coherent experiment. This notebook owns batch explanation generation, common interval representation, equal-duration masking, deletion metrics, and aggregate quantitative plots.
 
 \subsubsection*{Technical idea}
-SpeechXAI aligns speech with transcript words and measures the effect of perturbing each word-level audio segment. The quantitative comparison will use word identity, timestamps, and importance scores.
+The validated SpeechXAI workflow from Notebook 01 and LeGrad-inspired workflow from Notebook 04 are applied to the same controlled IEMOCAP set. SpeechXAI top-$k$ words define a union duration $X$. SpeechXAI masks, LeGrad top bins, and repeated random bins are then compared after silencing exactly $X$ seconds while preserving waveform length.
 
 \subsubsection*{Decisions made}
 \begin{itemize}
-  \item Word-level explanations are the primary SpeechXAI output for quantitative comparison.
-  \item Paralinguistic explanations remain available for qualitative analysis after the main word-level pipeline is stable.
-  \item SpeechXAI output will use the common columns \texttt{audio\_id}, \texttt{word}, \texttt{start}, \texttt{end}, and \texttt{score}.
-  \item The same audio and original predicted class will be used across explanation methods.
-\end{itemize}
-
-\subsubsection*{What was tested}
-Notebook 01 ran SpeechXAI's WhisperX alignment and leave-one-out explainer on one IEMOCAP utterance using the same SUPERB classifier selected for the project.
-
-\subsubsection*{Outcome}
-The single-audio SpeechXAI integration is operational. Real word timestamps, effective mask intervals, and attribution scores are available in the shared interval representation.
-
-\subsubsection*{Remaining issues}
-Notebook 05 should extend the validated single-audio workflow to the controlled evaluation set and define how transcription and explanations are cached for repeatable dataset-scale runs.
-
-\subsection{Notebook 06 --- Unified Interval Representation and Masking}
-
-\subsubsection*{Purpose}
-Provide a shared representation and masking protocol for word intervals, LeGrad time bins, and random baselines.
-
-\subsubsection*{Technical idea}
-SpeechXAI top-$k$ words define a duration $X$. LeGrad and random selections are then constrained to the same total duration. All selected regions are replaced by silence without changing sample count.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item SpeechXAI is the source of the shared duration because its native explanation unit is a word.
-  \item LeGrad regions are ranked time bins selected until duration $X$ is reached.
-  \item Random selections use the same bin resolution and duration $X$.
-  \item The last selected bin may be clipped to match $X$ closely.
-  \item Primary conditions are SpeechXAI-top, LeGrad-top, and Random.
-\end{itemize}
-
-\subsubsection*{What was tested}
-Duration-based interval selection, top-$k$ selection, random interval sampling, silence masking, and union-duration accounting were tested. Notebook 01 matched the effective SpeechXAI and random mask durations for every evaluated $k$.
-
-\subsubsection*{Outcome}
-The corrected duration-matching logic is available and the notebook scaffold executes successfully.
-
-\subsubsection*{Remaining issues}
-The full comparison still requires LeGrad explanation intervals for the same utterances.
-
-\subsection{Notebook 07 --- Deletion Evaluation}
-
-\subsubsection*{Purpose}
-Measure explanation faithfulness under the shared-duration masking protocol.
-
-\subsubsection*{Technical idea}
-For every audio and top-$k$ setting, the classifier confidence for the original predicted class is measured before and after masking. A faithful selection should remove regions that cause a larger confidence drop than same-duration random regions.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
+  \item Batch SpeechXAI generation is part of evaluation rather than a separate notebook because its single-audio behavior is already established in Notebook 01.
+  \item Interval unification and masking are part of the evaluation operation rather than independent experimental outcomes.
+  \item Both explanation methods use the common columns \texttt{audio\_id}, \texttt{start}, \texttt{end}, and \texttt{score}.
+  \item SpeechXAI is the source of duration $X$ because its native unit is a variable-duration word.
   \item Top-$k$ values are $1$, $2$, $3$, and $5$.
+  \item LeGrad bins are selected by score until their union duration reaches $X$.
+  \item Random bins use the same duration and are repeated 20 times.
   \item The main metric is absolute confidence drop for the original predicted class.
   \item Relative confidence drop and prediction flip rate are secondary metrics.
-  \item Random masking is repeated 20 times to estimate its mean and variability.
-  \item Each result records $k$, method, actual masked duration, original confidence, masked confidence, confidence drop, relative drop, flip state, and random-trial index.
+  \item Aggregate tables, deletion curves, boxplots, duration checks, and flip rates remain in this notebook because they are direct outputs of the quantitative experiment.
 \end{itemize}
 
 \subsubsection*{What was tested}
-Notebook 01 validated the evaluation logic on one utterance using real SpeechXAI leave-one-out importance and repeated random masking. Notebook 07 currently executes as a protocol scaffold.
+Notebook 01 validated real SpeechXAI attribution, silence masking, union-duration accounting, confidence drop, and repeated same-duration random masking on one utterance. The consolidated Notebook 05 currently contains the protocol scaffold that will extend those validated operations to SpeechXAI and LeGrad across the evaluation set.
 
 \subsubsection*{Outcome}
-The evaluation schema and fairness constraints are defined and validated at baseline scale.
+The evaluation schema and fairness constraints are defined and validated at single-audio scale. The previous standalone SpeechXAI, interval-masking, deletion, and final-summary placeholders have been removed because their responsibilities now belong to this one quantitative experiment.
 
 \subsubsection*{Remaining issues}
-The complete comparison requires SpeechXAI and LeGrad explanations across a controlled multi-audio evaluation set.
+The complete run requires a working LeGrad example from Notebook 04, a documented evaluation set, and execution across all selected audios.
 
-\subsection{Notebook 08 --- Qualitative Examples}
+\subsection{Notebook 06 --- Qualitative Examples}
 
 \subsubsection*{Purpose}
 Create interpretable examples that show where SpeechXAI and LeGrad agree or disagree and how masking changes model confidence.
@@ -256,32 +217,7 @@ The notebook structure and plotting requirements have been defined.
 The qualitative analysis plan is ready.
 
 \subsubsection*{Remaining issues}
-Representative cases can be selected after Notebook 07 produces full deletion results.
-
-\subsection{Notebook 09 --- Final Results Summary}
-
-\subsubsection*{Purpose}
-Aggregate deletion outcomes into the tables and plots used to answer the main research question.
-
-\subsubsection*{Technical idea}
-Results are grouped by method and SpeechXAI top-$k$ value. The analysis reports confidence-drop statistics together with mean masked duration, ensuring that interpretation includes the actual amount of removed speech.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item The horizontal axis of the deletion curve is SpeechXAI top-$k$, rather than an arbitrary audio-percentage budget.
-  \item Random trials are summarized by their mean and standard deviation.
-  \item Mean masked duration is reported for every $k$.
-  \item Optional class-wise analysis will be added if the final sample size supports it.
-\end{itemize}
-
-\subsubsection*{What was tested}
-The notebook executes and handles the current absence of full deletion results gracefully.
-
-\subsubsection*{Outcome}
-The aggregation schema and plot definitions reflect the corrected evaluation design.
-
-\subsubsection*{Remaining issues}
-Final tables and plots require completed SpeechXAI and LeGrad runs.
+Representative cases can be selected after Notebook 05 produces the complete deletion results. Aggregate tables remain in Notebook 05; this notebook is reserved for case-level interpretation.
 
 \section{Evaluation Design}
 

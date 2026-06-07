@@ -55,6 +55,65 @@ are set to zero. The segment remains in place, preserving:
 The paper chooses silence replacement because physically deleting a
 word would shorten the signal and introduce a separate duration shift.
 
+#### What the paper says about masking boundaries
+
+The paper describes masking at the level of the word segments produced
+from the alignment timestamps:
+
+- Section 2.1, **Segment contribution** (PDF page 3), says that one or
+  more segments are masked by zeroing their corresponding samples in
+  the time domain.
+- Footnote 2 on the same page says that zeroing is preferred to
+  removing segments because removal would introduce effects caused by
+  shorter recordings.
+- Appendix B.1, **Word-Level Attribution** (PDF page 13), again
+  describes selective zeroing, or silencing, of time-domain audio
+  segments. For LIME, it says that the audio is split according to the
+  timestamps derived from WhisperX.
+
+The paper does **not** specify additional temporal padding before or
+after a word. Its methodological description therefore identifies the
+WhisperX word interval `[start, end]` as the conceptual segment being
+masked.
+
+#### Additional padding in the released implementation
+
+The released SpeechXAI repository applies a wider interval than the
+paper explicitly documents. In
+`speechxai/explainers/utils_removal.py`, both `remove_word` and
+`remove_specified_words` define:
+
+```python
+a, b = 100, 40
+```
+
+The pydub slices and replacement duration then use:
+
+```text
+effective start = word start - 100 ms
+effective end   = word end + 40 ms
+```
+
+Consequently, the implementation silences the aligned word together
+with 100 ms of preceding context and 40 ms of following context. This
+is repository behavior rather than a padding rule stated in the paper.
+It matters when reproducing published code because:
+
+- the perturbation used to compute an attribution is wider than the
+  lexical WhisperX interval shown for the word;
+- padded intervals from neighboring words can overlap;
+- the true deletion budget must use the union of effective padded
+  intervals rather than summing their durations;
+- the upstream pydub implementation does not clamp a negative
+  `start - 100 ms` boundary explicitly, so words beginning within the
+  first 100 ms require special care.
+
+For this project, visualizations distinguish the lexical WhisperX
+interval from the effective padded mask. Quantitative masking follows
+the released implementation's effective interval so that the plotted
+perturbation and the attribution computation describe the same audio
+region.
+
 ### 3. Define the target output
 
 The paper explains the probability assigned to the model's predicted

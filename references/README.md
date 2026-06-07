@@ -12,6 +12,7 @@ directory.
 | wav2vec 2.0 | Baevski et al. (2020), [wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations](https://arxiv.org/abs/2006.11477) | `Baevski_2020_wav2vec2.pdf` / [summary](Baevski_2020_wav2vec2.md) |
 | SpeechBrain background | Ravanelli et al. (2021), [SpeechBrain: A General-Purpose Speech Toolkit](https://arxiv.org/abs/2106.04624) | `Ravanelli_2021_SpeechBrain.pdf` |
 | SpeechXAI | Pastor et al. (2024), [Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features](https://aclanthology.org/2024.eacl-long.136/) | `Pastor_2024_SpeechXAI.pdf` / [summary](Pastor_2024_SpeechXAI.md) |
+| Word alignment | Bain et al. (2023), [WhisperX: Time-Accurate Speech Transcription of Long-Form Audio](https://www.isca-archive.org/interspeech_2023/bain23_interspeech.html) | `Bain_2023_WhisperX.pdf` / [summary](Bain_2023_WhisperX.md) |
 | LeGrad | Bousselham et al. (2024), [LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity](https://arxiv.org/abs/2404.03214) | `Bousselham_2024_LeGrad.pdf` / [summary](Bousselham_2024_LeGrad.md) |
 
 ## Models, Datasets, and Repositories
