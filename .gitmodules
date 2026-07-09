@@ -1,0 +1,3 @@
+[submodule "third_party/LeGrad"]
+	path = third_party/LeGrad
+	url = https://github.com/WalBouss/LeGrad.git

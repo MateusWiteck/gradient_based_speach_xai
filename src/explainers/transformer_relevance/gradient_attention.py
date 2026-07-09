@@ -12,8 +12,9 @@ def extract_gradient_weighted_attentions(
     """
     Computes gradient × attention matrices for HuBERT.
 
-    This is the audio adaptation of the Transformer's
-    gradient-weighted attention relevance idea.
+    This is a LeGrad-inspired, gradient-weighted attention variant for audio.
+    Original LeGrad uses positive attention gradients directly; this function
+    multiplies the gradients by the attention probabilities before rollout.
 
     Returns:
         dict with:
@@ -92,7 +93,9 @@ def extract_gradient_weighted_attentions(
         # grad × attention
         grad_attn = grad * attn
 
-        # keep only positive contribution, as in the paper
+        # Keep only positive gradient-weighted contributions. This differs from
+        # original LeGrad, which clips attention gradients without multiplying
+        # them by the attention probabilities.
         grad_attn = grad_attn.clamp(min=0)
 
         # average over heads
