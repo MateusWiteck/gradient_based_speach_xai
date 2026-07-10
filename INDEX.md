@@ -7,6 +7,8 @@ Outputs are grouped by **experimental scenario**, not by individual command. Wit
 | `test_01_synthetic_sanity` | `run_01_sine`, `run_02_synthetic_speech` | Early controlled checks of rollout, Level 3, and contrastive relevance. |
 | `test_02_ravdess_explanation_benchmark` | `run_01_legacy_single_audio_unverified` through `run_06_class_specificity` | One RAVDESS scenario: external baseline evaluation, deletion-faithfulness, concentration, robustness, and class-specificity analysis. |
 | `test_03_iemocap_in_domain_benchmark` | `run_01_evaluation_smoke` through `run_08_class_specificity_metrics_smoke` | CPU-validated IEMOCAP workflow using the standard four-class mapping, including full prediction evaluation, faithfulness, sparsity tables, and class-specificity metrics. |
+| `test_05_duration_matched_smoke` | one-audio smoke runs | Duration-matched SpeechXAI/Pastor vs HuBERT evaluation used to validate the shared-duration deletion pipeline. |
+| `test_06_duration_matched_full_both_datasets` | timestamped full runs | Full quantitative evaluation over all compatible IEMOCAP and RAVDESS audios with SpeechXAI/Pastor, every HuBERT explanation mode, bottom controls, and random deletion by silence masking. |
 
 ## RAVDESS run order
 
@@ -22,7 +24,8 @@ Outputs are grouped by **experimental scenario**, not by individual command. Wit
 ## IEMOCAP run order
 
 IEMOCAP uses the official `EmoEvaluation` annotations. Its standard four-class
-subset maps `neu → neu`, `hap → hap`, `exc → hap`, `ang → ang`, and `sad → sad`.
+subset maps `neu -> neu`, `hap -> hap`, `exc -> hap`, `ang -> ang`, and
+`sad -> sad`.
 
 | Run | What it contains |
 | --- | --- |
@@ -37,6 +40,53 @@ subset maps `neu → neu`, `hap → hap`, `exc → hap`, `ang → ang`, and `sad
 
 The IEMOCAP checkpoint is already fine-tuned on IEMOCAP. Treat its results as
 in-domain diagnostics unless an explicitly documented held-out protocol is used.
+
+## Duration-matched SpeechXAI/Pastor comparison
+
+The current quantitative comparison is owned by:
+
+```text
+scripts/evaluate_duration_matched_speechxai.py
+```
+
+Full run over both datasets:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_duration_matched_speechxai.py `
+  --datasets iemocap,ravdess `
+  --iemocap-root data `
+  --ravdess-root data\ravdess\Audio_Speech_Actors_01-24 `
+  --output-root outputs\test_06_duration_matched_full_both_datasets `
+  --ks 1,2,3,5 `
+  --random-trials 20
+```
+
+The command writes one timestamped folder named like:
+
+```text
+iemocap_ravdess_duration_matched_speechxai_YYYYMMDD_HHMMSS_ffffff
+```
+
+Expected files:
+
+| File | Purpose |
+| --- | --- |
+| `audio_manifest.csv` | All selected IEMOCAP and RAVDESS audio records. |
+| `original_predictions.csv` | Original HuBERT prediction and target confidence before masking. |
+| `speechxai_word_scores.csv` | SpeechXAI/Pastor leave-one-out word scores. |
+| `selected_intervals.csv` | Exact word, token, bottom-control, and random deletion by silence masking intervals. |
+| `duration_matched_records.csv` | Per-mask deletion result rows. |
+| `duration_matched_summary.csv` | Aggregated confidence-drop and flip-rate metrics. |
+| `method_catalog.csv` | Method labels and descriptions. |
+| `failures.csv` | Failed audio records, written only when failures occur. |
+| `config.json` | Run configuration and output manifest. |
+
+This full command intentionally has no `--max-audios` argument. Use
+`--max-audios N` only for smoke tests.
+
+Each full run stores reproducibility metadata in `config.json`, including the
+command, Python/package versions, project commit, SpeechXAI commit, LeGrad
+commit, dirty git status, platform, and FFmpeg version.
 
 ## Finding the audio used
 

@@ -8,6 +8,7 @@ __pycache__/
 
 data/raw/
 data/iemocap/
+data/ravdess/
 data/Session*/
 data/metadata.csv
 data/*.wav

@@ -3,6 +3,7 @@ jupyterlab>=4
 nbclient>=0.10
 nbconvert>=7
 ipykernel>=6
+setuptools==70.3.0
 matplotlib>=3.8
 numpy>=1.24
 pandas>=2.0

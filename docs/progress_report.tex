@@ -807,7 +807,7 @@ The final quantitative evaluation follows these steps:
   \item Those SpeechXAI word intervals are replaced by silence, and the confidence drop for the original predicted class is measured.
   \item LeGrad-inspired time bins are ranked by relevance, and the highest-ranked bins whose total duration equals $X$ are selected.
   \item Those LeGrad-inspired regions are replaced by silence, and the same confidence drop is measured.
-  \item Random time bins with total duration $X$ are selected repeatedly to form a stable random baseline.
+  \item Random time bins with total duration $X$ are selected repeatedly to form a random deletion by silence masking baseline.
   \item All methods use the same audio, classifier, target class, masking operation, and removed duration.
 \end{enumerate}
 
