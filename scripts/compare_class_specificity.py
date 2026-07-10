@@ -21,6 +21,10 @@ from src.explainers.transformer_relevance.attention_extractor import (
 from src.explainers.transformer_relevance.gradient_attention import (
     extract_gradient_weighted_attentions,
 )
+from src.explainers.transformer_relevance.legrad_hubert import (
+    LEGRAD_HUBERT_EXPLANATION_MODES,
+    extract_legrad_hubert_relevance,
+)
 from src.explainers.transformer_relevance.score_pipeline import (
     EXPLANATION_MODES,
     compute_relevance_scores,
@@ -68,6 +72,7 @@ def main():
     predicted_class = base_result["predicted_class"]
     runner_up = runner_up_class(base_result["logits"], predicted_class)
     class_names = [str(model.config.id2label[index]) for index in range(model.config.num_labels)]
+    include_legrad = args.explanation_mode in LEGRAD_HUBERT_EXPLANATION_MODES
 
     relevance_by_label = {}
     rows = []
@@ -82,7 +87,22 @@ def main():
             device=device,
             target_class=target_class,
         )
-        relevance = compute_relevance_scores(model, base_result, grad_result)
+        legrad_result = None
+        if include_legrad:
+            legrad_result = extract_legrad_hubert_relevance(
+                model=model,
+                processor=processor,
+                waveform=waveform,
+                sampling_rate=sampling_rate,
+                device=device,
+                target_class=target_class,
+            )
+        relevance = compute_relevance_scores(
+            model,
+            base_result,
+            grad_result,
+            legrad_result=legrad_result,
+        )
         label = f"{class_names[target_class]} (class {target_class})"
         relevance_by_label[label] = relevance["scores"][args.explanation_mode].squeeze(0)
         score_by_target[target_class] = relevance_by_label[label]

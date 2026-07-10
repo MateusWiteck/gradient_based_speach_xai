@@ -9,6 +9,9 @@ from src.explainers.transformer_relevance.head_relevance import (
     compute_head_relevance,
     infer_pooling_type,
 )
+from src.explainers.transformer_relevance.legrad_hubert import (
+    LEGRAD_HUBERT_EXPLANATION_MODES,
+)
 from src.explainers.transformer_relevance.rollout import (
     compute_rollout_attention,
     rollout_from_token_relevance,
@@ -22,6 +25,7 @@ EXPLANATION_MODES = (
     "level3-contrastive",
     "head-conditioned-rollout",
     "contrastive-conditioned-rollout",
+    *LEGRAD_HUBERT_EXPLANATION_MODES,
 )
 
 
@@ -38,10 +42,58 @@ def normalize_token_scores(scores: torch.Tensor, eps: float = 1e-8) -> torch.Ten
     return torch.where(score_sums > eps, scores / score_sums.clamp_min(eps), uniform)
 
 
+def add_legrad_hubert_scores(
+    scores: dict[str, torch.Tensor],
+    legrad_result: dict | None,
+    *,
+    reference_shape: torch.Size,
+) -> None:
+    """Attach validated LeGrad-HuBERT scores without silent key overwrites."""
+    if legrad_result is None:
+        return
+
+    legrad_scores = legrad_result.get("scores")
+    if not isinstance(legrad_scores, dict):
+        raise ValueError("legrad_result must contain a 'scores' dictionary.")
+
+    known_modes = set(LEGRAD_HUBERT_EXPLANATION_MODES)
+    unexpected_modes = sorted(set(legrad_scores).difference(known_modes))
+    if unexpected_modes:
+        raise ValueError(
+            "legrad_result contains unsupported score modes: "
+            + ", ".join(unexpected_modes)
+        )
+
+    missing_modes = sorted(known_modes.difference(legrad_scores))
+    if missing_modes:
+        raise ValueError(
+            "legrad_result is missing expected score modes: "
+            + ", ".join(missing_modes)
+        )
+
+    for mode in LEGRAD_HUBERT_EXPLANATION_MODES:
+        if mode in scores:
+            raise RuntimeError(f"Refusing to overwrite existing score mode: {mode}")
+
+        score = legrad_scores[mode]
+        if not isinstance(score, torch.Tensor):
+            raise TypeError(f"LeGrad score {mode!r} must be a torch.Tensor.")
+        if score.shape != reference_shape:
+            raise ValueError(
+                f"LeGrad score {mode!r} has shape {tuple(score.shape)}, "
+                f"expected {tuple(reference_shape)}."
+            )
+        if not torch.isfinite(score).all():
+            raise ValueError(f"LeGrad score {mode!r} contains non-finite values.")
+
+        scores[mode] = score
+
+
 def compute_relevance_scores(
     model,
     base_result: dict,
     grad_result: dict,
+    legrad_result: dict | None = None,
     contrast_class: int | None = None,
 ) -> dict:
     """Build every supported temporal-relevance variant for one utterance.
@@ -91,6 +143,12 @@ def compute_relevance_scores(
             contrastive_head,
         ),
     }
+    add_legrad_hubert_scores(
+        scores,
+        legrad_result,
+        reference_shape=rollout_score.shape,
+    )
+
     return {
         "scores": scores,
         "target_class": target_class,
@@ -99,4 +157,5 @@ def compute_relevance_scores(
         "raw_rollout": raw_rollout,
         "head_relevance": head_relevance,
         "contrastive_head_relevance": contrastive_head,
+        "legrad_hubert": legrad_result,
     }

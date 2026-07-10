@@ -16,6 +16,7 @@ data/*.mp3
 
 results/*
 !results/README.md
+outputs/
 
 pretrained_models/
 wav2vec2_checkpoints/

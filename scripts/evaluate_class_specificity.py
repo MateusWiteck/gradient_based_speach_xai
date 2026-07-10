@@ -41,6 +41,10 @@ from src.explainers.transformer_relevance.attention_extractor import (
 from src.explainers.transformer_relevance.gradient_attention import (
     extract_gradient_weighted_attentions,
 )
+from src.explainers.transformer_relevance.legrad_hubert import (
+    LEGRAD_HUBERT_EXPLANATION_MODES,
+    extract_legrad_hubert_relevance,
+)
 from src.explainers.transformer_relevance.score_pipeline import (
     EXPLANATION_MODES,
     compute_relevance_scores,
@@ -65,6 +69,7 @@ def compute_scores_for_target(
     device: str,
     base_result: dict,
     target_class: int,
+    include_legrad: bool,
 ) -> dict:
     """Compute all explanation modes for one explicit target class."""
     grad_result = extract_gradient_weighted_attentions(
@@ -75,7 +80,22 @@ def compute_scores_for_target(
         device=device,
         target_class=target_class,
     )
-    return compute_relevance_scores(model, base_result, grad_result)
+    legrad_result = None
+    if include_legrad:
+        legrad_result = extract_legrad_hubert_relevance(
+            model=model,
+            processor=processor,
+            waveform=waveform,
+            sampling_rate=sampling_rate,
+            device=device,
+            target_class=target_class,
+        )
+    return compute_relevance_scores(
+        model,
+        base_result,
+        grad_result,
+        legrad_result=legrad_result,
+    )
 
 
 def summarize_by_predicted_class(records: pd.DataFrame) -> pd.DataFrame:
@@ -131,6 +151,7 @@ def main():
     invalid_modes = sorted(set(modes).difference(EXPLANATION_MODES))
     if invalid_modes:
         parser.error(f"Unsupported explanation modes: {invalid_modes}")
+    include_legrad = any(mode in LEGRAD_HUBERT_EXPLANATION_MODES for mode in modes)
 
     predictions = pd.read_csv(args.predictions_csv)
     dataset_name = infer_dataset_name(predictions, args.dataset_name)
@@ -182,6 +203,7 @@ def main():
             device=device,
             base_result=base_result,
             target_class=predicted_class,
+            include_legrad=include_legrad,
         )
         runner_up_relevance = compute_scores_for_target(
             model=model,
@@ -191,6 +213,7 @@ def main():
             device=device,
             base_result=base_result,
             target_class=runner_up,
+            include_legrad=include_legrad,
         )
 
         for mode in modes:

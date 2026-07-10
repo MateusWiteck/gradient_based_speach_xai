@@ -21,6 +21,10 @@ from src.explainers.transformer_relevance.attention_extractor import (
 from src.explainers.transformer_relevance.gradient_attention import (
     extract_gradient_weighted_attentions,
 )
+from src.explainers.transformer_relevance.legrad_hubert import (
+    LEGRAD_HUBERT_EXPLANATION_MODES,
+    extract_legrad_hubert_relevance,
+)
 from src.explainers.transformer_relevance.score_pipeline import (
     EXPLANATION_MODES,
     compute_relevance_scores,
@@ -134,10 +138,21 @@ def main():
         device=device,
         target_class=args.target_class,
     )
+    legrad_result = None
+    if args.explanation_mode in LEGRAD_HUBERT_EXPLANATION_MODES:
+        legrad_result = extract_legrad_hubert_relevance(
+            model=model,
+            processor=processor,
+            waveform=waveform,
+            sampling_rate=sampling_rate,
+            device=device,
+            target_class=args.target_class,
+        )
     relevance = compute_relevance_scores(
         model=model,
         base_result=base_result,
         grad_result=grad_result,
+        legrad_result=legrad_result,
         contrast_class=args.contrast_class,
     )
     final_score = relevance["scores"][args.explanation_mode]
@@ -154,6 +169,12 @@ def main():
     print("Number of gradient-attention layers:", len(grad_result["grad_attentions"]))
     print("Joint attention shape:", tuple(relevance["joint_attention"].shape))
     print("Raw rollout shape:", tuple(relevance["raw_rollout"].shape))
+    if legrad_result is not None:
+        print("LeGrad-HuBERT attention layers:", legrad_result["num_attention_layers"])
+        print(
+            "LeGrad-HuBERT weighted layer sum:",
+            float(legrad_result["renormalized_hubert_layer_weights"].sum().item()),
+        )
     _print_score_summary("Head relevance", relevance["head_relevance"])
     _print_score_summary("Contrastive head relevance", relevance["contrastive_head_relevance"])
     _print_score_summary("Final relevance", final_score)

@@ -43,6 +43,10 @@ from src.explainers.transformer_relevance.attention_extractor import (
 from src.explainers.transformer_relevance.gradient_attention import (
     extract_gradient_weighted_attentions,
 )
+from src.explainers.transformer_relevance.legrad_hubert import (
+    LEGRAD_HUBERT_EXPLANATION_MODES,
+    extract_legrad_hubert_relevance,
+)
 from src.explainers.transformer_relevance.score_pipeline import (
     EXPLANATION_MODES,
     compute_relevance_scores,
@@ -54,7 +58,15 @@ from src.utils.audio import load_audio_mono_16k
 CONTRASTIVE_MODES = {"level3-contrastive", "contrastive-conditioned-rollout"}
 
 
-def compute_explanation_scores(model, processor, waveform, sampling_rate: int, device: str):
+def compute_explanation_scores(
+    model,
+    processor,
+    waveform,
+    sampling_rate: int,
+    device: str,
+    *,
+    include_legrad: bool,
+):
     """Compute every shared score variant from one audio utterance."""
     base_result = extract_hubert_attentions(
         model=model,
@@ -70,7 +82,22 @@ def compute_explanation_scores(model, processor, waveform, sampling_rate: int, d
         sampling_rate=sampling_rate,
         device=device,
     )
-    relevance = compute_relevance_scores(model, base_result, grad_result)
+    legrad_result = None
+    if include_legrad:
+        legrad_result = extract_legrad_hubert_relevance(
+            model=model,
+            processor=processor,
+            waveform=waveform,
+            sampling_rate=sampling_rate,
+            device=device,
+            target_class=grad_result["target_class"],
+        )
+    relevance = compute_relevance_scores(
+        model,
+        base_result,
+        grad_result,
+        legrad_result=legrad_result,
+    )
     return (
         relevance["scores"],
         relevance["target_class"],
@@ -184,6 +211,7 @@ def main():
     invalid_modes = sorted(set(modes).difference(EXPLANATION_MODES))
     if invalid_modes:
         parser.error(f"Unsupported explanation modes: {invalid_modes}")
+    include_legrad = any(mode in LEGRAD_HUBERT_EXPLANATION_MODES for mode in modes)
     if any(not 0 < fraction <= 1 for fraction in fractions):
         parser.error("--fractions values must be in (0, 1].")
 
@@ -224,7 +252,12 @@ def main():
         provenance = example_provenance(example)
         waveform, sampling_rate = load_audio_mono_16k(audio_path)
         score_by_mode, target_class, contrast_class = compute_explanation_scores(
-            model, processor, waveform, sampling_rate, device
+            model,
+            processor,
+            waveform,
+            sampling_rate,
+            device,
+            include_legrad=include_legrad,
         )
         original_logit, original_probability = target_scores(
             model, processor, waveform, sampling_rate, target_class, device

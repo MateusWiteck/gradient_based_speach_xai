@@ -656,7 +656,7 @@ Notebook 03 must confirm that these returned attention tensors retain usable, no
 Verify that gradients of a target class score with respect to Transformer attention maps can be obtained.
 
 \subsubsection*{Technical idea}
-LeGrad uses sensitivity to attention maps as its explanation signal. For speech, the target quantity is the classifier score for the original predicted emotion, and the required diagnostic is $\partial s_{\hat{y}}/\partial A_l$ for one or more Transformer layers. The later implementation in this repository uses those gradients in a modified way by multiplying them with attention values before rollout.
+LeGrad uses sensitivity to attention maps as its explanation signal. For speech, the target quantity is the classifier score for the original predicted emotion, and the required diagnostic is $\partial s_{\hat{y}}/\partial A_l$ for one or more Transformer layers. The repository now keeps two families separate: older hybrid rollout baselines multiply positive gradients by attention values before rollout, while the LeGrad-HuBERT modes in Notebook 04 use positive attention gradients directly as the relevance signal.
 
 \subsubsection*{Decisions made}
 \begin{itemize}
@@ -678,27 +678,68 @@ Gradient availability depends on how the wav2vec 2.0 attention implementation re
 \subsection{Notebook 04 --- LeGrad-Inspired Temporal Explanation}
 
 \subsubsection*{Purpose}
-Convert attention-gradient information into a temporal relevance signal over the speech utterance.
+Implement and validate explicit LeGrad-style HuBERT temporal relevance modes
+on one real IEMOCAP utterance.
 
 \subsubsection*{Technical idea}
-For each Transformer layer, positive class-sensitive attention gradients are combined with attention activations, averaged across heads, propagated with rollout, and reduced to token relevance. Token relevance is then mapped to audio time. This is a LeGrad-inspired adaptation rather than the original LeGrad reduction, which uses the positive attention gradient itself as the explanation signal.
+Notebook 04 now uses the implementation in
+\path{src/explainers/transformer_relevance/legrad_hubert.py}. The LeGrad-HuBERT
+modes compute the positive attention-gradient signal directly,
+\[
+\max(0, \partial s / \partial A_l),
+\]
+then reduce that signal over attention heads and temporal query positions before
+aggregating layers. Two score definitions are exposed: a final-score variant using the real HuBERT score
+\[
+s_c = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_{\mathrm{mix}})))_c
+\]
+and a layer-local variant using
+\[
+s_{l,c} = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_l)))_c.
+\]
+For both score definitions, relevance is reduced over heads and query tokens so
+that source/key temporal tokens remain as the explanation axis.
 
 \subsubsection*{Decisions made}
 \begin{itemize}
-  \item The method is presented as LeGrad-inspired because it adapts the attention-gradient sensitivity principle from vision to speech.
-  \item Relevance uses positive gradients multiplied by attention values before rollout, which differs from original LeGrad.
-  \item Head and layer aggregation use simple means for interpretability and reproducibility.
+  \item Four long, explicit mode names were added so result files identify the
+  score source, formula, layer aggregation, and token axis.
+  \item The implemented formula for LeGrad-HuBERT modes is
+  \texttt{ReLU(d score / d attention)}, not
+  \texttt{ReLU((d score / d attention) * attention)}.
+  \item Both mean layer aggregation and renormalized HuBERT-layer-weighted
+  aggregation are implemented, so the analysis can choose between a
+  LeGrad-like mean and a HuBERT-aware weighting.
+  \item Each mode returns sum-normalized temporal scores for quantitative
+  evaluation and min-max-normalized visual scores for paper-style plots.
+  \item The primary notebook visualization uses the layer-local score with
+  renormalized HuBERT layer weights, while the notebook also reports the
+  final-score variants.
   \item Temporal outputs use small fixed-duration bins or token intervals that can participate in duration-matched deletion evaluation.
 \end{itemize}
 
 \subsubsection*{What was tested}
-Reusable aggregation and token-to-time utilities have been prepared.
+Notebook 04 was executed on utterance \texttt{Ses01F\_impro01\_F005}. It loaded
+the HuBERT classifier, computed all four LeGrad-HuBERT modes, displayed the
+predicted-class logits, printed intermediate layer-relevance shapes, displayed
+the renormalized HuBERT layer weights and layer-local target logits, validated
+finite sum-normalized evaluation scores and min-max visual scores, listed the
+top temporal tokens, and rendered both a Notebook-01-style waveform relevance
+plot and the existing spectrogram timeline plot.
 
 \subsubsection*{Outcome}
-The representation and output format are defined. Real relevance curves depend on successful attention-gradient extraction in Notebook 03.
+The notebook completed successfully. The selected utterance produced 12
+Transformer attention layers and 201 temporal tokens. Both
+\texttt{final\_score\_layer\_relevance} and
+\texttt{layer\_local\_score\_layer\_relevance} had shape
+\texttt{(1, 12, 201)}. The renormalized HuBERT Transformer-layer weights summed
+to 1.0, and each final temporal relevance vector summed to 1 within numerical
+tolerance.
 
 \subsubsection*{Remaining issues}
-The reduction direction of the token-token relevance matrix must be selected empirically and kept fixed. Temporal mapping must also account for the wav2vec 2.0 feature encoder stride.
+The current token-to-time mapping remains the existing uniform approximation
+over the waveform duration. A later refinement could map HuBERT feature frames
+through the convolutional frontend stride and receptive field more explicitly.
 
 \subsection{Notebook 05 --- Quantitative Evaluation}
 
@@ -800,7 +841,7 @@ SpeechXAI unit & Word-aligned audio segments & This is SpeechXAI's native, human
 
 LeGrad unit & Transformer tokens or fixed temporal bins & Attention-gradient relevance is naturally produced at the encoder-token level. \\
 
-LeGrad-inspired formulation & Positive attention gradients multiplied by attention values, then used in rollout & This borrows LeGrad's attention-gradient sensitivity but is not the original LeGrad reduction. \\
+LeGrad-HuBERT formulation & Positive attention gradients; final-score and layer-local score variants are both implemented & This is the explicit HuBERT adaptation of the LeGrad reduction, while the older gradient-attention rollout modes remain available as baselines. \\
 
 Shared duration & $X$ seconds from SpeechXAI top-$k$ words & This makes word-level and time-bin explanations comparable under equal audio removal. \\
 

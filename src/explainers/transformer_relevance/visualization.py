@@ -7,6 +7,121 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.patches import Patch
 
 
+def plot_waveform_with_interval_scores(
+    waveform,
+    sampling_rate: int,
+    intervals,
+    *,
+    score_column: str = "relevance",
+    start_column: str = "start_time",
+    end_column: str = "end_time",
+    label_column: str | None = None,
+    masked_start_column: str | None = None,
+    masked_end_column: str | None = None,
+    title: str = "Temporal relevance",
+    score_label: str = "Relevance",
+    positive_color: str = "tab:red",
+    negative_color: str = "tab:blue",
+    output_path: str | None = None,
+):
+    """Plot waveform plus interval-level scores on a shared time axis.
+
+    This is the reusable version of the two-panel visualization used in
+    Notebook 01.  It works for word-level SpeechXAI intervals and token-level
+    HuBERT relevance intervals.
+    """
+    required_columns = {start_column, end_column, score_column}
+    missing_columns = required_columns.difference(intervals.columns)
+    if missing_columns:
+        raise ValueError(f"intervals is missing columns: {sorted(missing_columns)}")
+
+    waveform_np = waveform.detach().cpu().numpy().squeeze()
+    if waveform_np.ndim != 1:
+        raise ValueError("waveform must contain one mono audio channel.")
+
+    starts = intervals[start_column].to_numpy(dtype=float)
+    ends = intervals[end_column].to_numpy(dtype=float)
+    scores = intervals[score_column].to_numpy(dtype=float)
+    if scores.size == 0 or not np.isfinite(scores).all():
+        raise ValueError("interval scores must contain at least one finite value.")
+    if np.any(ends <= starts):
+        raise ValueError("Each interval must have end > start.")
+
+    duration = waveform_np.size / sampling_rate
+    time_axis = np.arange(waveform_np.size) / sampling_rate
+
+    figure, (waveform_axis, score_axis) = plt.subplots(
+        2,
+        1,
+        figsize=(15, 7.5),
+        sharex=True,
+        gridspec_kw={"height_ratios": [2.2, 1.2], "hspace": 0.08},
+    )
+
+    waveform_axis.plot(time_axis, waveform_np, color="0.18", linewidth=0.65)
+    waveform_axis.axhline(0.0, color="0.65", linewidth=0.6)
+
+    if masked_start_column and masked_end_column:
+        span_starts = intervals[masked_start_column].to_numpy(dtype=float)
+        span_ends = intervals[masked_end_column].to_numpy(dtype=float)
+    else:
+        span_starts = starts
+        span_ends = ends
+
+    span_colors = np.where(scores >= 0, positive_color, negative_color)
+    for index, (span_start, span_end, start, end, color) in enumerate(
+        zip(span_starts, span_ends, starts, ends, span_colors)
+    ):
+        waveform_axis.axvspan(span_start, span_end, color=color, alpha=0.08)
+        waveform_axis.axvline(start, color="0.45", linewidth=0.45, linestyle=":")
+        waveform_axis.axvline(end, color="0.45", linewidth=0.45, linestyle=":")
+        if label_column is not None and index < 40:
+            label = str(intervals.iloc[index][label_column])
+            waveform_axis.text(
+                (start + end) / 2,
+                1.02,
+                label,
+                transform=waveform_axis.get_xaxis_transform(),
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                rotation=25,
+            )
+
+    centers = (starts + ends) / 2
+    widths = ends - starts
+    score_axis.bar(
+        centers,
+        scores,
+        width=widths,
+        color=span_colors,
+        alpha=0.75,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    score_axis.axhline(0.0, color="0.2", linewidth=0.8)
+    score_axis.set_xlim(0.0, duration)
+
+    score_limit = max(float(np.abs(scores).max()) * 1.15, 0.01)
+    if np.all(scores >= 0):
+        score_axis.set_ylim(0.0, score_limit)
+    else:
+        score_axis.set_ylim(-score_limit, score_limit)
+
+    score_axis.set_xlabel("Time (seconds)")
+    score_axis.set_ylabel(score_label)
+    waveform_axis.set_ylabel("Amplitude")
+    figure.suptitle(title, fontsize=12, y=0.985)
+    figure.tight_layout(rect=[0, 0, 1, 0.93])
+
+    if output_path is not None:
+        figure.savefig(output_path, dpi=200, bbox_inches="tight")
+        print(f"Saved waveform interval-score figure to: {output_path}")
+    else:
+        plt.show()
+    plt.close(figure)
+
+
 def plot_relevance_timeline(
     waveform,
     sampling_rate: int,
