@@ -62,7 +62,8 @@ def select_intervals_by_duration(
     """Select ranked intervals until the requested duration in seconds is reached.
 
     This is the main helper for the corrected evaluation: SpeechXAI top-k words
-    determine a duration X, then LeGrad and random baselines receive the same X.
+    determine a duration X, then LeGrad and random deletion by silence masking
+    baselines receive the same X.
     """
     if intervals_table.empty:
         return intervals_table.copy()

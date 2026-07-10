@@ -8,6 +8,7 @@ __pycache__/
 
 data/raw/
 data/iemocap/
+data/ravdess/
 data/Session*/
 data/metadata.csv
 data/*.wav
@@ -16,6 +17,7 @@ data/*.mp3
 
 results/*
 !results/README.md
+outputs/
 
 pretrained_models/
 wav2vec2_checkpoints/
@@ -30,3 +32,11 @@ references/*
 *.pt
 *.ckpt
 *.onnx
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
