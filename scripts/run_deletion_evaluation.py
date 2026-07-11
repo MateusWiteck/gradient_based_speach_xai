@@ -6,7 +6,7 @@ evaluation loop here so larger runs can be launched without notebook state.
 
 
 def main() -> None:
-    print("Run Notebook 05 first, then port the stable evaluation loop into this script.")
+    print("Run Notebook 06 first, then port the stable evaluation loop into this script.")
 
 
 if __name__ == "__main__":

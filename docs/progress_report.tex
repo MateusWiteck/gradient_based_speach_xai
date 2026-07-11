@@ -741,13 +741,84 @@ The current token-to-time mapping remains the existing uniform approximation
 over the waveform duration. A later refinement could map HuBERT feature frames
 through the convolutional frontend stride and receptive field more explicitly.
 
-\subsection{Notebook 05 --- Quantitative Evaluation}
+\subsection{Notebook 05 --- Level 3 Relevance Attribution Workflow}
+
+\subsubsection*{Purpose}
+Validate the rollout-based Level 3 attribution workflow on one real IEMOCAP
+utterance, using the same example as Notebook 04.
+
+\subsubsection*{Technical idea}
+Notebook 05 documents the hybrid Level 3 construction separately from
+LeGrad-HuBERT. For each Transformer layer, the layer matrix used by rollout is
+not the raw attention map. It is built as
+\[
+G_l =
+\mathrm{mean}_{\mathrm{heads}}\left(
+\max\left(0,\frac{\partial s_{\hat{y}}}{\partial A_l}\odot A_l\right)
+\right),
+\]
+where \(s_{\hat{y}}\) is the predicted-class score and \(A_l\) is the attention
+map of layer \(l\). The matrices \(G_l\) are passed through residual-added,
+row-normalized attention rollout to obtain a temporal rollout score. That score
+is then multiplied by a lightweight classifier-head relevance term:
+\[
+R_{\mathrm{level3}} =
+\mathrm{normalize}\left(
+R_{\mathrm{rollout}} \odot R_{\mathrm{head}}
+\right).
+\]
+This is the key distinction from Notebook 04: Level 3 uses rollout and a
+gradient-times-attention product, while LeGrad-HuBERT uses positive attention
+gradients directly and does not use rollout.
+
+\subsubsection*{Decisions made}
+\begin{itemize}
+  \item The Level 3 workflow is kept in its own notebook so it is not confused
+  with the LeGrad-HuBERT implementation.
+  \item The notebook exposes the intermediate tensors
+  \texttt{grad\_attentions}, \texttt{joint\_attention},
+  \texttt{rollout\_score}, \texttt{head\_relevance}, and
+  \texttt{scores["level3"]}.
+  \item The final evaluation score remains sum-normalized, while a min-max
+  score is used only for visual contrast in plots.
+  \item The same utterance, \texttt{Ses01F\_impro01\_F005}, is used so the
+  LeGrad-HuBERT and Level 3 notebooks can be compared directly.
+\end{itemize}
+
+\subsubsection*{What was tested}
+Notebook 05 was executed on \texttt{Ses01F\_impro01\_F005}. It loaded the
+HuBERT classifier, captured forward attentions and classifier-head inputs,
+computed target-class attention gradients, built all layer-level
+gradient-times-attention matrices, computed rollout and head relevance, and
+verified that a manual reconstruction of
+\texttt{normalize(rollout\_score * head\_relevance)} exactly matched
+\texttt{scores["level3"]}.
+
+\subsubsection*{Outcome}
+The notebook completed successfully. The selected utterance was predicted as
+\texttt{ang}, produced 12 Transformer attention layers and 201 temporal tokens,
+and the maximum absolute difference between the manual Level 3 reconstruction
+and the project implementation was 0.0. The notebook also displays top temporal
+tokens and renders both the spectrogram relevance timeline and the
+Notebook-01-style waveform interval plot.
+
+\subsubsection*{Remaining issues}
+Level 3 remains a hybrid rollout baseline rather than a LeGrad reproduction.
+The same uniform token-to-time mapping approximation used elsewhere in the
+project also applies here.
+
+\subsection{Notebook 06 --- Quantitative Evaluation}
 
 \subsubsection*{Purpose}
 Run the complete multi-audio comparison in one coherent experiment. This notebook owns batch explanation generation, common interval representation, equal-duration masking, deletion metrics, and aggregate quantitative plots.
 
 \subsubsection*{Technical idea}
-The validated SpeechXAI workflow from Notebook 01 and LeGrad-inspired workflow from Notebook 04 are applied to the same controlled IEMOCAP set. SpeechXAI top-$k$ words define a union duration $X$. SpeechXAI masks, LeGrad-inspired top bins, and repeated random bins are then compared after silencing exactly $X$ seconds while preserving waveform length.
+The validated SpeechXAI workflow from Notebook 01, LeGrad-HuBERT workflow from
+Notebook 04, and Level 3 workflow from Notebook 05 are applied to the same
+controlled evaluation protocol. SpeechXAI top-$k$ words define a union duration
+\(X\). SpeechXAI masks, HuBERT explanation top bins, and repeated random bins
+are then compared after silencing exactly \(X\) seconds while preserving
+waveform length.
 
 \subsubsection*{Decisions made}
 \begin{itemize}
@@ -756,7 +827,7 @@ The validated SpeechXAI workflow from Notebook 01 and LeGrad-inspired workflow f
   \item Both explanation methods use the common columns \texttt{audio\_id}, \texttt{start}, \texttt{end}, and \texttt{score}.
   \item SpeechXAI is the source of duration $X$ because its native unit is a variable-duration word.
   \item Top-$k$ values are $1$, $2$, $3$, and $5$.
-  \item LeGrad-inspired bins are selected by score until their union duration reaches $X$.
+  \item HuBERT explanation bins are selected by score until their union duration reaches $X$.
   \item Random bins use the same duration and are repeated 20 times.
   \item The main metric is absolute confidence drop for the original predicted class.
   \item Relative confidence drop and prediction flip rate are secondary metrics.
@@ -764,15 +835,21 @@ The validated SpeechXAI workflow from Notebook 01 and LeGrad-inspired workflow f
 \end{itemize}
 
 \subsubsection*{What was tested}
-Notebook 01 validated real SpeechXAI attribution, silence masking, union-duration accounting, confidence drop, and repeated same-duration random masking on one utterance. The consolidated Notebook 05 currently contains the protocol scaffold that will extend those validated operations to SpeechXAI and LeGrad across the evaluation set.
+Notebook 01 validated real SpeechXAI attribution, silence masking,
+union-duration accounting, confidence drop, and repeated same-duration random
+masking on one utterance. The consolidated Notebook 06 contains the protocol
+scaffold that extends those validated operations to SpeechXAI, Level 3, and
+LeGrad-HuBERT modes across the evaluation set.
 
 \subsubsection*{Outcome}
 The evaluation schema and fairness constraints are defined and validated at single-audio scale. The previous standalone SpeechXAI, interval-masking, deletion, and final-summary placeholders have been removed because their responsibilities now belong to this one quantitative experiment.
 
 \subsubsection*{Remaining issues}
-The complete run requires a working LeGrad example from Notebook 04, a documented evaluation set, and execution across all selected audios.
+The complete run requires the working LeGrad-HuBERT example from Notebook 04,
+the Level 3 example from Notebook 05, a documented evaluation set, and execution
+across all selected audios.
 
-\subsection{Notebook 06 --- Qualitative Examples}
+\subsection{Notebook 07 --- Qualitative Examples}
 
 \subsubsection*{Purpose}
 Create interpretable examples that show where SpeechXAI and LeGrad agree or disagree and how masking changes model confidence.
@@ -794,7 +871,9 @@ The notebook structure and plotting requirements have been defined.
 The qualitative analysis plan is ready.
 
 \subsubsection*{Remaining issues}
-Representative cases can be selected after Notebook 05 produces the complete deletion results. Aggregate tables remain in Notebook 05; this notebook is reserved for case-level interpretation.
+Representative cases can be selected after Notebook 06 produces the complete
+deletion results. Aggregate tables remain in Notebook 06; this notebook is
+reserved for case-level interpretation.
 
 \section{Evaluation Design}
 
@@ -805,8 +884,8 @@ The final quantitative evaluation follows these steps:
   \item For each audio and each $k \in \{1,2,3,5\}$, the top-$k$ SpeechXAI words are selected.
   \item The selected words define a total duration $X$ seconds.
   \item Those SpeechXAI word intervals are replaced by silence, and the confidence drop for the original predicted class is measured.
-  \item LeGrad-inspired time bins are ranked by relevance, and the highest-ranked bins whose total duration equals $X$ are selected.
-  \item Those LeGrad-inspired regions are replaced by silence, and the same confidence drop is measured.
+  \item HuBERT explanation time bins are ranked by relevance, and the highest-ranked bins whose total duration equals $X$ are selected.
+  \item Those HuBERT explanation regions are replaced by silence, and the same confidence drop is measured.
   \item Random time bins with total duration $X$ are selected repeatedly to form a random deletion by silence masking baseline.
   \item All methods use the same audio, classifier, target class, masking operation, and removed duration.
 \end{enumerate}
