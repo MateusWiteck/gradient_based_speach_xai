@@ -1,941 +1,187 @@
-\documentclass[11pt]{article}
+\documentclass[10pt]{article}
 
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.68in]{geometry}
+\usepackage{amsmath}
+\usepackage{array}
 \usepackage{booktabs}
+\usepackage{enumitem}
 \usepackage{hyperref}
-\usepackage{longtable}
 \usepackage{tabularx}
 \usepackage{xcolor}
 
 \hypersetup{
   colorlinks=true,
   linkcolor=blue,
-  urlcolor=blue
+  urlcolor=blue,
+  citecolor=blue
 }
 
-\title{Technical Project Overview\\
-\large LeGrad-Inspired Temporal Explanations for Speech Emotion Recognition}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.25em}
+\setlist{nosep,leftmargin=*}
+\renewcommand{\arraystretch}{1.08}
+
+\title{\vspace{-1.4em}Gradient-Based Temporal Explanations for Speech Emotion Recognition}
 \author{gradient\_based\_speach\_xai}
-\date{June 7, 2026}
+\date{July 2026}
 
 \begin{document}
 \maketitle
+\vspace{-1.6em}
 
-\section{Project Overview}
+\section{Introduction}
 
-This project compares two approaches for explaining a pretrained speech emotion recognition classifier. SpeechXAI provides human-readable explanations based on word-aligned audio segments. The proposed LeGrad-inspired method will derive temporal relevance from gradients associated with the attention mechanisms of a wav2vec 2.0 encoder. The classification task uses speech samples and emotion annotations from IEMOCAP.
+Speech emotion recognition models make utterance-level decisions from a signal that mixes lexical content, prosody, pauses, speaker variation, and background conditions. Pastor et al.'s SpeechXAI work addresses this interpretability problem with an intuitive perturbation protocol: align words in the audio, silence each word-related segment, and measure how much the target-class probability changes \cite{pastor2024speechxai}. Their explanation unit is therefore a spoken word, which is easy to inspect and discuss.
 
-The quantitative evaluation uses deletion by silence masking. Important audio regions are replaced by silence while the original signal length is preserved, and the resulting confidence drop for the classifier's original predicted class is measured. The central methodological decision is to compare word-level SpeechXAI explanations with time-bin or token-level LeGrad explanations under the same total occluded duration.
+Our project asks a narrower research question: \textbf{do model-specific gradient-based temporal attributions identify more decision-relevant regions than Pastor/SpeechXAI word-level attributions?} We also test what is gained or lost by moving from word granularity to smaller HuBERT token intervals. The comparison is not between different classifiers. SpeechXAI/Pastor, Level 3, and LeGrad-HuBERT are all evaluated on the same HuBERT model and the same masking operation.
 
-\section{Sources and External References}
+\section{Related Work}
 
-\begin{itemize}
-  \item \textbf{Dataset: IEMOCAP.} The local data follows the five-session IEMOCAP release from the USC Signal Analysis and Interpretation Laboratory. The corpus contains speech, transcripts, and categorical emotion annotations. Project source: \href{https://sail.usc.edu/iemocap/}{USC IEMOCAP website}. Dataset paper: \href{https://sail.usc.edu/iemocap/Busso_2008_iemocap.pdf}{Busso et al., ``IEMOCAP: Interactive Emotional Dyadic Motion Capture''}.
+Pastor et al. position SpeechXAI against the broader XAI literature in vision, language, and tabular data, including gradient saliency, Integrated Gradients, Grad-CAM, LIME, SHAP, and occlusion-style perturbation methods \cite{pastor2024speechxai}. For speech, they emphasize that many previous explanations are time-frequency heatmaps or phoneme/fixed-frame analyses, which may be less accessible for non-expert users or less suitable for semantically intensive speech classification tasks. Their method follows an input-perturbation view: the relevance of an audio segment is the probability difference between the original utterance and the utterance with that segment masked.
 
-  \item \textbf{Pretrained classifier.} The project uses \href{https://huggingface.co/superb/wav2vec2-base-superb-er}{\texttt{superb/wav2vec2-base-superb-er}}, the Hugging Face wav2vec 2.0 emotion-recognition checkpoint loaded by the SpeechXAI repository for IEMOCAP. The model exposes four output classes: anger, happiness/excitement, neutral, and sadness.
+Our work keeps Pastor's faithfulness question but changes the explanation source. Level 3 is a Transformer attention-flow attribution inspired by attention rollout \cite{abnar2020rollout} and class-specific head relevance. LeGrad-HuBERT adapts the LeGrad idea, which treats positive gradients with respect to attention maps as the explanation signal, originally proposed for Vision Transformers \cite{bousselham2024legrad}. In Pastor et al.'s concept-based XAI taxonomy \cite{poeta2024concept}, SpeechXAI's word segments are close to \emph{post-hoc, local, symbolic class-concept relations}: each spoken word is a human-readable concept whose effect on a class is measured. Our methods are more fine-grained and model-specific: they are \emph{post-hoc, local, gradient-based temporal feature attributions} for Transformer audio tokens. They become concept-level explanations only if the selected token intervals are later grouped into words or higher-level speech concepts.
 
-  \item \textbf{wav2vec 2.0.} The encoder architecture originates from Baevski et al., \href{https://arxiv.org/abs/2006.11477}{``wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations''}.
+\section{Research Gaps}
 
-  \item \textbf{SUPERB.} The active checkpoint follows the SUPERB speech-processing benchmark described by Yang et al., \href{https://arxiv.org/abs/2105.01051}{``SUPERB: Speech Processing Universal PERformance Benchmark''}.
+Pastor/SpeechXAI gives explanations that are easy to read, but the word is a coarse unit. A word can contain several acoustic events, and emotion classifiers may rely on pauses, emphasis, hesitation, pitch, or short stressed regions that are not aligned with whole words. Conversely, token-level gradient methods can find smaller regions, but those regions are less immediately meaningful to humans. This creates the main gap studied here: \textbf{the trade-off between interpretability by word-level concepts and faithfulness by finer temporal granularity.}
 
-  \item \textbf{SpeechXAI.} The word-level explanation method follows Pastor et al., \href{https://aclanthology.org/2024.eacl-long.136/}{``Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features,'' EACL 2024}. Repository: \href{https://github.com/elianap/SpeechXAI}{elianap/SpeechXAI}.
-
-  \item \textbf{WhisperX alignment.} SpeechXAI obtains word timestamps with Bain et al., \href{https://www.isca-archive.org/interspeech_2023/bain23_interspeech.html}{``WhisperX: Time-Accurate Speech Transcription of Long-Form Audio,'' Interspeech 2023}. WhisperX combines VAD-guided segmentation, Whisper transcription, and external phoneme alignment.
-
-  \item \textbf{LeGrad.} The proposed temporal method is inspired by Bousselham et al., \href{https://arxiv.org/abs/2404.03214}{``LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity''}. Repository: \href{https://github.com/WalBouss/LeGrad}{WalBouss/LeGrad}.
-\end{itemize}
-
-The current project configuration uses IEMOCAP. No separate YAMLCap dataset source is configured.
-
-\section{Model Architecture Used by the Current Pipeline}
-
-The executable transformer-relevance scripts in the current branch load the
-SUPERB HuBERT emotion-recognition checkpoint through
-\texttt{load\_hubert\_emotion\_model}:
-
-\begin{verbatim}
-superb/hubert-base-superb-er
-\end{verbatim}
-
-The older project configuration still contains references to the wav2vec 2.0
-checkpoint used in the SpeechXAI comparison path, but the implemented rollout
-and head-relevance pipeline is written around a HuBERT sequence-classification
-model. Notebook \path{notebooks/00_model_used.ipynb} documents this architecture
-and provides executable inspection cells.
-
-The executed notebook reports the following active configuration values:
-
-\begin{itemize}
-  \item model type: \texttt{hubert}
-  \item architecture: \texttt{HubertForSequenceClassification}
-  \item Transformer depth: 12 layers and 12 attention heads
-  \item hidden size: 768
-  \item classifier projection size: 256
-  \item weighted layer aggregation: \texttt{use\_weighted\_layer\_sum=True}
-  \item output labels: \texttt{neu}, \texttt{hap}, \texttt{ang}, and \texttt{sad}
-\end{itemize}
-
-The notebook also shows that the older YAML configuration still points to the
-following wav2vec 2.0 checkpoint, while the current transformer-relevance
-scripts use the HuBERT checkpoint above:
-
-\begin{verbatim}
-superb/wav2vec2-base-superb-er
-\end{verbatim}
-
-The HuBERT model first converts the waveform into a lower-rate sequence of
-acoustic frames with a convolutional feature encoder. These frames are then
-processed by the HuBERT Transformer encoder, which produces temporal hidden
-states rather than image patches. The convolutional frontend is important for
-mapping token relevance back to approximate waveform intervals, but it is not
-the main source of difficulty for adapting LeGrad.
-
-The more important issue is the sequence-classification head. In the Hugging
-Face HuBERT sequence-classification architecture, the classifier path can be
-written schematically as follows:
-
-\begin{verbatim}
-waveform
-  -> convolutional feature encoder
-  -> HuBERT Transformer hidden states
-  -> optional learned weighted sum of hidden layers
-  -> projector
-  -> temporal mean pooling
-  -> classifier
-  -> emotion logits
-\end{verbatim}
-
-When \texttt{use\_weighted\_layer\_sum} is enabled, the head does not consume
-one individual Transformer layer directly. Instead, it forms a learned mixture
-of hidden layers,
+A second gap is architectural. LeGrad was designed for Vision Transformers, where patch tokens remain in a visual-token pathway. The HuBERT sequence classifier used here has a different head:
 \[
-H_{\mathrm{mix}} = \sum_{l=0}^{12} \mathrm{softmax}(\alpha)_l H_l,
+\text{waveform} \rightarrow \text{HuBERT hidden states } H_0,\ldots,H_{12}
+\rightarrow H_{\mathrm{mix}} \rightarrow \text{projector}
+\rightarrow \text{masked temporal mean pooling}
+\rightarrow \text{classifier}.
 \]
-and passes this mixed representation into the projection, pooling, and classifier stack. This
-matters for LeGrad because the original method defines a target score at each
-Transformer layer before differentiating that score with respect to the
-attention map of the same layer.
-
-More explicitly, the HuBERT forward pass returns a tuple of hidden-state
-tensors:
-
-\begin{verbatim}
-outputs.hidden_states = [H_0, H_1, ..., H_12]
-\end{verbatim}
-
-Here $H_0$ is the temporal representation entering the Transformer stack after
-the convolutional/frontend and feature-projection stages, while
-$H_1,\ldots,H_{12}$ are the outputs of the 12 Transformer layers. Each hidden
-state has shape
+When weighted layer aggregation is active, the model computes
 \[
-\mathrm{shape}(H_l) = B \times T \times 768,
+H_{\mathrm{mix}}=\sum_{l=0}^{12}\mathrm{softmax}(\alpha)_l H_l.
 \]
-where $B$ is the batch size, $T$ is the number of HuBERT temporal frames, and
-768 is the hidden dimension. The model stacks these tensors along a new layer
-axis:
+The stored \(\alpha_l\) values are forward mixture parameters, not class-specific relevance scores. They say how much the trained head mixes each hidden-state tensor into \(H_{\mathrm{mix}}\), while LeGrad needs a scalar class score whose gradient can flow back to an attention map. This is why we evaluate explicit HuBERT adaptations rather than claiming a direct copy of the original ViT method.
 
-\begin{verbatim}
-stacked_hidden_states = stack([H_0, H_1, ..., H_12])
-                      # shape: [B, 13, T, 768]
-\end{verbatim}
+\section{Methodology}
 
-The checkpoint contains one learned scalar per entry in this stack:
-\begin{verbatim}
-layer_weights  # shape: [13]
-\end{verbatim}
+\textbf{Model and target.} The implemented pipeline loads the HuBERT checkpoint \texttt{superb/\allowbreak hubert-base-superb-er}, with 12 Transformer layers, 12 heads, 768 hidden dimensions, a 256-dimensional projector, masked temporal mean pooling, and four emotion labels: neutral, happy/excited, angry, and sad \cite{hsu2021hubert,yang2021superb}. Every explanation targets the model's original predicted class \(\hat{y}\), not necessarily the dataset ground-truth label. This is important because the explanation is about the model decision being evaluated.
 
-These raw scalars are the stored trainable parameters. During each forward pass,
-the model normalizes them with a softmax and uses the resulting coefficients to
-form the representation that the classification head actually receives:
-
-\begin{verbatim}
-norm_weights = softmax(layer_weights)       # shape: [13]
-
-H_mix = sum_l norm_weights[l] * H_l         # shape: [B, T, 768]
-
-projected = projector(H_mix)                # shape: [B, T, 256]
-pooled = mean_over_time(projected)           # shape: [B, 256]
-logits = classifier(pooled)                 # shape: [B, 4]
-\end{verbatim}
-
-The softmax coefficients are therefore not stored as independent checkpoint
-parameters. They are recomputed from \texttt{layer\_weights} every time the
-model runs, which preserves the same mixture logic if the model is fine-tuned:
-fine-tuning changes the raw \texttt{layer\_weights}, and the forward pass then
-produces updated normalized coefficients.
-
-For explainability, it is important not to confuse these coefficients with a
-LeGrad layer score. The coefficient
-$\alpha_l=\mathrm{softmax}(\texttt{layer\_weights})_l$ says how much the
-trained HuBERT head mixes representation $H_l$ into $H_{\mathrm{mix}}$. It is a
-learned, forward-time mixture coefficient. It is not by itself a
-class-dependent score for the current utterance. LeGrad, however, requires a
-scalar activation whose gradient can be taken with respect to an attention map,
-for example
+\textbf{Pastor/SpeechXAI baseline.} We reproduce the word-level SpeechXAI protocol as the baseline method. WhisperX provides word timestamps, each word interval is silenced, and the score is
 \[
-s_l = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_l)))_c
+r(x_i)=p(\hat{y}\mid x)-p(\hat{y}\mid x\setminus x_i).
 \]
-or the real final score
+The implementation follows the SpeechXAI repository behavior by applying the word mask in the waveform domain with the same effective interval logic used in our notebooks and scripts. This produces word scores, ranked word intervals, and a human-readable explanation.
+
+\textbf{Level 3 relevance.} Level 3 is the strongest rollout-based method retained for the report, but it is not default raw-attention rollout. Default rollout composes attention probabilities; our code first builds class-conditioned matrices from positive gradient-times-attention. For each HuBERT layer \(l\), attention probabilities \(A_l\) and their target-logit gradients are captured. The layer matrix is
 \[
-s = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_{\mathrm{mix}})))_c.
+G_l=\mathrm{mean}_{h}\left[\mathrm{ReLU}\left(
+\frac{\partial s_{\hat{y}}}{\partial A_{l,h}}\odot A_{l,h}
+\right)\right],
 \]
-If one used only $\alpha_l$ as the score, its derivative with respect to the
-attention map $A_l$ would not provide an utterance- or class-specific temporal
-explanation, because $\alpha_l$ is not produced from the current attention map.
-The learned coefficients are therefore better viewed as possible weights for
-aggregating already-computed layer relevance maps, not as the relevance score
-from which those maps are derived.
-
-Thus the learned mixture occurs before the projector and before temporal
-pooling. The temporal structure is still present in $H_{\mathrm{mix}}$ because
-the tensor keeps the $T$ frame axis; the utterance-level compression happens
-after projection, when the model averages over time.
-
-The \texttt{projector} should therefore not be confused with the layer-mixing
-operation. The layer mixture uses \texttt{layer\_weights} to combine
-$H_0,\ldots,H_{12}$ into $H_{\mathrm{mix}}$. The projector is a separate learned
-linear layer, with \texttt{projector.weight} shape \texttt{(256, 768)}, applied
-to each temporal frame of $H_{\mathrm{mix}}$ to map 768-dimensional HuBERT
-features into the 256-dimensional space consumed by the final classifier.
-
-The executed checkpoint-tensor inspection in Notebook
-\path{notebooks/00_model_used.ipynb} confirms that
-\texttt{layer\_weights} has shape \texttt{(13,)}, while the classifier head has
-\texttt{projector.weight} shape \texttt{(256, 768)} and
-\texttt{classifier.weight} shape \texttt{(4, 256)}. The 13 mixture entries
-correspond to $H_0$ plus the 12 Transformer layer outputs. This is important:
-the final HuBERT emotion head mixes representations from all these levels
-before classification, whereas attention maps are only available for the 12
-Transformer layers. The forward-time softmax coefficients computed from the
-inspected raw checkpoint weights are spread across layers rather than
-concentrated in one layer; they range from 0.067804 for $H_1$ to 0.084699 for
-$H_{10}$.
-
-The notebook's executed source-code inspection confirms this exact forward
-path in the installed \texttt{transformers} implementation: the model sets
-\texttt{output\_hidden\_states=True} when weighted layer aggregation is active,
-stacks all hidden states, applies \texttt{softmax(self.layer\_weights)}, sums
-the weighted layers, then applies \texttt{self.projector}, temporal pooling, and
-\texttt{self.classifier}. Thus the ordinary classifier score is produced from
-the learned layer mixture, not from an isolated intermediate layer.
-
-In the ViT/CLIP setting used by LeGrad, the layer-wise score is more direct.
-Each Transformer block produces visual patch tokens in the same representation
-stream. The official LeGrad implementation takes an intermediate block output,
-aggregates the tokens into an image feature, applies the final visual
-normalization/projection, and computes the target image-text score. Thus the
-intermediate score follows a natural visual-token pathway:
-
-\begin{verbatim}
-ViT layer H_l
-  -> token aggregation
-  -> final visual projection
-  -> target score_l
-\end{verbatim}
-
-For HuBERT, applying the classifier head to one individual layer,
-
-\begin{verbatim}
-HuBERT layer H_l
-  -> projector
-  -> temporal mean pooling
-  -> classifier
-  -> target score_l
-\end{verbatim}
-
-is a methodological adaptation. It may be useful and testable, but it may not
-exactly match the representation pathway learned by a checkpoint whose head was
-trained on $H_{\mathrm{mix}}$ rather than on each single $H_l$. This is the
-specific architectural reason why a faithful temporal LeGrad implementation for
-HuBERT is less trivial than applying the original ViT code unchanged.
-
-\section{Implemented Methods and Core Logic}
-
-The current branch implements a lightweight temporal-relevance pipeline for a HuBERT-based speech emotion classifier. Rather than attempting full Transformer-aware relevance propagation, the implementation uses a compact approximation that combines two ideas: attention flow through the encoder and class-sensitive evidence from the final classifier head.
-
-After checking the official LeGrad implementation, the terminology should be
-kept precise. Original LeGrad uses the positive gradient of the target
-activation with respect to an attention map as the explanation signal,
-$\max(0, \partial s / \partial A)$. It does not multiply that gradient by the
-attention values, and it does not perform attention rollout. The implementation
-in this repository should therefore be described as a LeGrad-inspired
-attention-gradient rollout variant, not as a direct implementation of LeGrad.
-
-The pipeline has three conceptual stages.
-
-\begin{enumerate}
-  \item \textbf{Attention-gradient rollout.} The model is run once with
-  attention outputs enabled and gradients are taken with respect to the target
-  class logit. For each Transformer layer, positive gradient-weighted attention
-  is averaged over heads and then propagated through the layer stack to form a
-  joint rollout matrix describing how information can diffuse across tokens.
-
-  \item \textbf{Head/pooling relevance.} The final HuBERT token representations that enter the classification head are scored for a target class using the classifier weight. Under mean pooling, each token receives a contribution proportional to $H_t \cdot w_c / T$, where $H_t$ is the token representation, $w_c$ is the target-class weight, and $T$ is the number of tokens (or the number of valid tokens for masked pooling).
-
-  \item \textbf{Method-specific combination.} The rollout signal and the head relevance signal are combined in different ways to produce several explanation modes. These are the methods currently implemented in the branch.
-\end{enumerate}
-
-The current implementation does not merely list these variants as names. Each
-method is produced by the same score-construction function, so the exact
-relationship between the variants is explicit. The implementation first builds
-shared intermediate tensors and then chooses a different final combination rule.
-
-\begin{enumerate}
-  \item \textbf{Shared rollout construction.} The matrices passed into rollout
-  are not raw attention maps from a single head. They are gradient-weighted
-  layer attention matrices built in \texttt{extract\_gradient\_weighted\_attentions}.
-  During the forward pass, the model returns one attention tensor per
-  Transformer layer with shape \texttt{[batch, heads, tokens, tokens]}. The
-  target-class logit is then backpropagated, which gives a gradient tensor of
-  the same shape for each attention tensor. For each layer $l$ and head $h$,
-  the implementation multiplies attention by its target-logit gradient and
-  keeps only positive contributions:
-  $G_{l,h} = \max(0, \nabla A_{l,h} \odot A_{l,h})$. The layer matrix used by
-  rollout is the mean over heads, $A_l = \frac{1}{H}\sum_h G_{l,h}$.
-  Because the attention maps are softmax probabilities and are non-negative,
-  this is equivalent to $\max(0, \nabla A_{l,h}) \odot A_{l,h}$. This is the
-  key methodological difference from original LeGrad, which reduces
-  $\max(0, \nabla A_{l,h})$ directly without multiplying by $A_{l,h}$.
-
-\begin{verbatim}
-def build_gradient_weighted_layer_attentions(attentions, target_logit):
-    retain_grad(attentions)
-    target_logit.backward()
-
-    layer_attentions = []
-    for attn in attentions:
-        grad = attn.grad
-
-        weighted = grad * attn
-        weighted = clamp_min(weighted, 0)
-
-        # [batch, heads, tokens, tokens] -> [batch, tokens, tokens]
-        A_l = mean(weighted, axis=heads)
-        layer_attentions.append(A_l)
-
-    return layer_attentions
-\end{verbatim}
-
-  These per-layer matrices are passed to \texttt{compute\_rollout\_attention}.
-  For each layer, the implementation adds an identity matrix to preserve
-  residual/self paths, row-normalizes the result, and then multiplies the
-  matrices through the Transformer stack. If $I$ is the identity matrix, the
-  augmented matrix is $\tilde{A}_l = \mathrm{row\_normalize}(A_l + I)$. This
-  row normalization is not a softmax; it simply rescales each row to sum to
-  one after the self-connection has been added. This rollout step is also not
-  part of original LeGrad; it is the attention-flow component of this
-  repository's hybrid explanation. The joint rollout is then
-  computed by repeated batch matrix multiplication:
-  $R = \tilde{A}_L \tilde{A}_{L-1} \cdots \tilde{A}_1$.
-
-\begin{verbatim}
-def compute_rollout_attention(layer_attentions):
-    eye = identity(num_tokens)
-    augmented = []
-
-    for A in layer_attentions:
-        A_residual = A + eye
-        A_residual = A_residual / row_sum(A_residual)
-        augmented.append(A_residual)
-
-    R = augmented[0]
-    for A in augmented[1:]:
-        R = batch_matmul(A, R)
-
-    return R
-\end{verbatim}
-
-  The pure rollout score is obtained by averaging over the final-token rows of
-  the rollout matrix. Because HuBERT sequence classifiers do not use a ViT-like
-  class token, the mean strategy treats all final tokens as possible evidence
-  carriers. The averaged score is min-max scaled by
-  \texttt{rollout\_to\_temporal\_relevance} and then normalized so each
-  utterance has a valid distribution over time tokens.
-
-\begin{verbatim}
-raw_rollout = mean(R, axis=final_token_rows)
-raw_rollout = min_max_scale(raw_rollout)
-rollout_score = normalize_nonnegative(raw_rollout)
-\end{verbatim}
-
-  \item \textbf{Target-class head relevance.} The implementation captures the
-  HuBERT hidden states immediately before the classification head. For the
-  current SUPERB HuBERT classifier, the head is linear projection followed by
-  mean pooling and a linear classifier. The code folds the projector into the
-  classifier weight, so the effective class weight in HuBERT hidden-state space
-  is $W_{\mathrm{eff}} = W_{\mathrm{classifier}} W_{\mathrm{projector}}$. For
-  target class $c$, token $t$ receives the time-dependent logit contribution
-  $H_t \cdot W_{\mathrm{eff},c} / T$, where $T$ is the number of valid tokens.
-  Positive evidence is normalized first; if no positive evidence exists, the
-  implementation falls back to absolute contribution, and if all contributions
-  are zero it uses a uniform distribution over valid tokens.
-
-\begin{verbatim}
-def compute_head_relevance(H, logits, target_class, model, token_mask):
-    W_eff = classifier.weight @ projector.weight
-    w_target = W_eff[target_class]
-
-    contribution = dot(H, w_target)        # [batch, time]
-    contribution = contribution / valid_token_count(token_mask)
-
-    positive = clamp_min(contribution, 0)
-    absolute = abs(contribution)
-
-    if sum(positive) > eps:
-        return positive / sum(positive)
-    if sum(absolute) > eps:
-        return absolute / sum(absolute)
-    return uniform_over_valid_tokens(token_mask)
-\end{verbatim}
-
-  \item \textbf{Contrastive head relevance.} The contrastive branch explains
-  why the target class beats a competing class. If a contrast class is not
-  supplied, the implementation chooses the highest-logit non-target class for
-  each sample. It then replaces the target weight with the margin weight
-  $W_{\mathrm{eff},c} - W_{\mathrm{eff},k}$ and normalizes the resulting token
-  contributions with the same positive/absolute/uniform fallback.
-
-\begin{verbatim}
-def compute_contrastive_head_relevance(H, logits, target_class):
-    contrast_class = argmax_non_target_logit(logits, target_class)
-    W_eff = classifier.weight @ projector.weight
-
-    margin_weight = W_eff[target_class] - W_eff[contrast_class]
-    contribution = dot(H, margin_weight)
-    contribution = contribution / valid_token_count(token_mask)
-
-    return normalize_positive_abs_or_uniform(contribution)
-\end{verbatim}
-\end{enumerate}
-
-\paragraph{Shared inputs used by the explanation methods.}
-After the rollout and head-relevance steps above, the implementation has four
-named tensors that are reused by the individual explanation methods.
-
-\texttt{joint\_attention} is the full rollout matrix $R$ returned by
-  \texttt{compute\_rollout\_attention}. It has shape
-  \texttt{[batch, tokens, tokens]}. It keeps token-to-token rollout paths: an
-  entry $R_{i,j}$ describes how much final token $i$ routes relevance to token
-  $j$ through the stacked, gradient-weighted attention maps.
-
-\texttt{rollout\_score} is the one-dimensional temporal rollout score derived
-  from \texttt{joint\_attention}. It averages the rollout matrix over final-token
-  rows, min-max scales that vector, clamps negative values, and normalizes each
-  utterance so the token scores sum to one. It has shape
-  \texttt{[batch, tokens]}.
-
-\texttt{head\_relevance} is the normalized target-class classifier-head
-  relevance. It is computed from the hidden states entering the head and the
-  effective target-class weight $W_{\mathrm{eff},c}$. It has shape
-  \texttt{[batch, tokens]} and gives the tokens that positively support the
-  target class at the classifier head, with absolute/uniform fallbacks when
-  positive evidence is unavailable.
-
-\texttt{contrastive\_head} is the normalized contrastive classifier-head
-  relevance. It is computed in the same space as \texttt{head\_relevance}, but
-  uses the target-versus-competitor margin weight
-  $W_{\mathrm{eff},c} - W_{\mathrm{eff},k}$. If the competitor is not specified,
-  the highest-logit non-target class is used. It also has shape
-  \texttt{[batch, tokens]}.
-
-\begin{verbatim}
-joint_attention = compute_rollout_attention(grad_attentions)
-
-raw_rollout = rollout_to_temporal_relevance(
-    joint_attention,
-    strategy="mean",
-)
-rollout_score = normalize_token_scores(raw_rollout)
-
-head_relevance = normalize_token_scores(
-    compute_head_relevance(H, logits, target_class, model, token_mask)
-)
-
-contrastive_head, contrast_classes = compute_contrastive_head_relevance(
-    H,
-    logits,
-    target_class,
-    model,
-    contrast_class,
-    token_mask,
-)
-contrastive_head = normalize_token_scores(contrastive_head)
-\end{verbatim}
-
-\paragraph{Explanation methods.}
-\begin{enumerate}
-  \item \textbf{\texttt{rollout}.} This method returns the normalized rollout
-  distribution directly. It is the target-agnostic baseline: it describes where
-  information can flow through the Transformer, but it does not use the
-  classifier head to ask which tokens support a particular emotion class.
-
-\begin{verbatim}
-scores["rollout"] = rollout_score
-\end{verbatim}
-
-  \item \textbf{\texttt{level3}.} This method keeps the original product-style
-  Level 3 formulation used in the branch. It intersects the target-agnostic
-  rollout map with target-class evidence from the classifier head. A token is
-  therefore important only when it is both reachable through the rollout graph
-  and positively contributes to the target class at the head.
-
-\begin{verbatim}
-scores["level3"] = normalize_nonnegative(
-    rollout_score * head_relevance
-)
-\end{verbatim}
-
-  \item \textbf{\texttt{level3-contrastive}.} This variant uses the same
-  product rule, but replaces target-class head relevance with target-versus-
-  competitor margin relevance. It highlights tokens that support the target
-  class relative to the selected competing class, rather than tokens that merely
-  support the target logit in isolation.
-
-\begin{verbatim}
-scores["level3-contrastive"] = normalize_nonnegative(
-    rollout_score * contrastive_head
-)
-\end{verbatim}
-
-  \item \textbf{\texttt{head-conditioned-rollout}.} This method does not average
-  every row of the joint rollout matrix. Instead, it uses the normalized
-  target-class head relevance as a seed distribution over final tokens and
-  propagates that seed backward through the joint rollout matrix. If
-  $R_{i,j}$ describes the rollout path from final token $i$ to input token $j$,
-  the conditioned score for token $j$ is
-  $\sum_i s_i R_{i,j}$, where $s_i$ is the normalized head-relevance seed.
-
-\begin{verbatim}
-def rollout_from_token_relevance(R, token_relevance):
-    seeds = clamp_min(token_relevance, 0)
-    seeds = normalize_or_uniform(seeds)
-
-    conditioned = batch_matmul(seeds[:, None, :], R)
-    conditioned = squeeze(conditioned, axis=1)
-    conditioned = clamp_min(conditioned, 0)
-
-    return conditioned / sum(conditioned)
-
-scores["head-conditioned-rollout"] = rollout_from_token_relevance(
-    R,
-    head_relevance,
-)
-\end{verbatim}
-
-  \item \textbf{\texttt{contrastive-conditioned-rollout}.} This is the
-  contrastive version of the conditioned rollout method. The seed distribution
-  is the target-versus-competitor head relevance, and the rollout matrix
-  propagates those contrastive seeds through the Transformer attention paths.
-
-\begin{verbatim}
-scores["contrastive-conditioned-rollout"] = rollout_from_token_relevance(
-    R,
-    contrastive_head,
-)
-\end{verbatim}
-\end{enumerate}
-
-The implementation is therefore a lightweight, auditable hybrid of
-attention-gradient weighting, rollout, and classifier-head relevance. It is
-useful for experiments because it is easy to compute, easy to compare across
-methods, and directly produces a temporal relevance curve over the input
-waveform. It should not be reported as an exact reproduction of the LeGrad
-algorithm.
-
-\section{Notebook-by-Notebook Technical Overview}
-
-\subsection{Notebook 00 --- Model Used and Classification Head Architecture}
-
-\subsubsection*{Purpose}
-Document the active model architecture used by the current transformer-relevance
-pipeline and explain why the classification head design matters for a faithful
-LeGrad adaptation.
-
-\subsubsection*{Technical idea}
-The notebook loads the model configuration for
-\texttt{superb/hubert-base-superb-er}, displays the relevant architecture
-fields, renders the HuBERT sequence-classification path, and prints the
-installed \texttt{transformers} forward-code excerpt where
-\texttt{use\_weighted\_layer\_sum}, \texttt{layer\_weights},
-\texttt{projector}, temporal pooling, and \texttt{classifier} appear. It then
-compares this design with the ViT/CLIP path used by the official LeGrad code.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item The notebook treats \texttt{superb/hubert-base-superb-er} as the active
-  model for the current relevance scripts, while displaying the older YAML model
-  source for traceability.
-  \item The notebook inspects the real checkpoint tensor file to report learned
-  \texttt{layer\_weights} and the concrete projector/classifier parameter
-  shapes without relying only on configuration metadata.
-  \item The notebook separates the convolutional frontend issue from the
-  classification-head issue: the frontend affects token-to-time mapping, while
-  the head affects how a layer-wise LeGrad score should be defined.
-\end{itemize}
-
-\subsubsection*{Outcome}
-Notebook \path{notebooks/00_model_used.ipynb} was executed and now provides a
-visual explanation of the active model. The run confirmed a
-\texttt{HubertForSequenceClassification} configuration with 12 Transformer
-layers, 12 attention heads, hidden size 768, classifier projection size 256,
-four emotion labels, and \texttt{use\_weighted\_layer\_sum=True}. It also
-prints the installed forward-code excerpt showing the learned hidden-layer
-mixture before projection, pooling, and classification. The checkpoint
-inspection confirms that the learned mixture uses 13 entries, one for $H_0$ and
-one for each of the 12 Transformer outputs, before the 768-to-256 projector and
-4-class emotion classifier.
-
-\subsection{Notebook 01 --- SpeechXAI Single Example}
-
-\subsubsection*{Purpose}
-Establish a complete SpeechXAI explanation and deletion-evaluation workflow on one IEMOCAP utterance before integrating the LeGrad-inspired method.
-
-\subsubsection*{Technical idea}
-SpeechXAI uses WhisperX to transcribe the utterance and align each word with its actual start and end time. The same timestamp objects are passed into SpeechXAI's leave-one-out explainer, ensuring that each attribution score refers to the word interval shown in the visualization. SpeechXAI measures importance as the confidence change caused by replacing a word region with silence. The paper describes zeroing the samples inside the WhisperX word interval. The released repository silences a larger interval: it starts 100\,ms before the WhisperX word start and ends 40\,ms after the WhisperX word end. Thus, the attribution assigned to one word is calculated after silencing the word together with these adjacent audio samples.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item A pretrained wav2vec 2.0 emotion classifier is used so the project can focus on explanation quality rather than classifier training.
-  \item One utterance is used to keep this notebook focused on the explanation workflow and visualization.
-  \item The original predicted class is the attribution and deletion target.
-  \item Silence replacement preserves the waveform length.
-  \item SpeechXAI's WhisperX transcription is the only source of word text and timing; no character-based or uniform timing approximation is used.
-  \item Transcription is performed once, and the returned word segments are reused by the explainer and plot so words, timestamps, and scores remain index-aligned.
-  \item WhisperX's per-word transcription confidence is retained in the attribution table so uncertain alignments remain visible during interpretation.
-  \item The paper's Section 2.1 and Appendix B.1 describe zeroing word segments derived from WhisperX timestamps to preserve the original recording length. They do not specify temporal padding around those segments.
-  \item The released repository's \texttt{utils\_removal.py} defines \texttt{a=100} and \texttt{b=40}. For a WhisperX word interval $[t_{\mathrm{start}},t_{\mathrm{end}}]$, \texttt{remove\_word} and \texttt{remove\_specified\_words} silence $[t_{\mathrm{start}}-100\,\mathrm{ms},t_{\mathrm{end}}+40\,\mathrm{ms}]$.
-  \item The notebook reproduces the repository implementation rather than silently replacing it with the paper-level interval description.
-  \item The visualization distinguishes two regions: the lexical interval reported by WhisperX and the larger interval actually silenced by the repository.
-  \item A separate overlap diagnostic displays every effective mask on its own row and computes sample-level mask depth. Regions covered by two or more masks are highlighted explicitly.
-  \item Attribution bars use SpeechXAI's raw confidence-drop values. They are not rescaled to make the largest word equal to one, because that would hide the magnitude of the model response.
-  \item The waveform-loading path used by the project is checked against SpeechXAI's pydub-loading path. Both must produce the same predicted class and probability vector before the explanation is accepted.
-  \item Word intervals must be chronological, have positive duration, remain inside the audio, and correspond one-to-one with SpeechXAI's returned features and scores.
-  \item The notebook rejects an utterance when its first aligned word begins before SpeechXAI's 100\,ms pre-word padding. The upstream removal function does not clamp this slice at zero, so accepting such an example could make the displayed mask differ from the perturbation actually evaluated.
-  \item The final evaluation uses the top-$k$ SpeechXAI words to define the shared masking duration.
-  \item Overlapping padded masks are counted by their union duration so the audio-removal budget is not inflated.
-  \item The notebook links the upstream implementation modules beside the attribution code. The LOO explainer calls single-word removal, the removal utility performs waveform replacement, and the faithfulness evaluator invokes multi-word removal. The linked files are \path{loo_speech_explainer.py}, \path{utils_removal.py}, and \path{faithfulness_measures_speech.py}.
-  \item Notebook 01 writes no result files; all results remain visible in the executed notebook.
-\end{itemize}
-
-\subsubsection*{What was tested}
-The selected audio was loaded and classified, then transcribed and aligned with SpeechXAI's WhisperX function. The returned segments were passed directly into SpeechXAI's leave-one-out explainer and checked against the returned feature order. Timestamp validity, word-score alignment, and the 100\,ms first-word safety condition were validated. The original prediction obtained from SpeechXAI's pydub representation matched the prediction obtained from the waveform shown in the notebook. The first visualization used real word locations, effective silence masks, raw confidence-drop attribution values, and per-word transcription confidence. The second visualization inspected padded removal intervals and computed overlap depth at waveform-sample resolution. Top-$k$ SpeechXAI deletion was compared with repeated random masking using the same union duration.
-
-\subsubsection*{Outcome}
-The notebook executed successfully for utterance \texttt{Ses01F\_impro01\_F005}. WhisperX located the first word at 0.594 seconds, preserving the initial silence and later pauses. The returned word-confidence values ranged from 0.760 to 0.980. The classifier predicted anger with confidence 0.8781. SpeechXAI assigned the largest raw confidence drop, 0.4218, to ``what's''. The overlap diagnostic found six distinct regions covered by multiple padded masks, with a maximum depth of two simultaneous masks. The visualizations, attribution table, consistency checks, and shared-duration evaluation all completed successfully.
-
-\subsubsection*{Remaining issues}
-The current validation covers one utterance only. WhisperX confidence is useful diagnostic information but is not a guarantee that every boundary is correct. The 100/40\,ms expansion is present in the released Python code but is not documented in the paper, so future experiments should state explicitly whether they reproduce the repository behavior or use unpadded paper-level word intervals. Utterances with a word beginning inside the first 100\,ms are currently rejected because of the upstream SpeechXAI slicing behavior; supporting them safely would require clamping the library's perturbation boundary. The pipeline must be run on a controlled multi-audio set before drawing comparative conclusions.
-
-\subsection{Notebook 02 --- Attention Access Test}
-
-\subsubsection*{Purpose}
-Determine whether the wav2vec 2.0 Transformer attention maps required by the LeGrad-inspired method are accessible.
-
-\subsubsection*{Technical idea}
-The active classifier is a Hugging Face \texttt{Wav2Vec2ForSequenceClassification} model. The diagnostic step requests attention outputs directly from its Transformer encoder and inspects their dimensions and numerical behavior.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item Attention access is treated as a required checkpoint before developing LeGrad.
-  \item The Hugging Face classifier is accessed directly, matching the model-loading path used by SpeechXAI.
-  \item Attention tensors should be inspected across layers and heads and visualized for at least one layer-head pair.
-\end{itemize}
-
-\subsubsection*{What was tested}
-The configured SUPERB classifier was run on the same IEMOCAP utterance used in Notebook 01 with attention output enabled. The notebook inspected every returned layer, validated finite values, printed tensor dimensions, and visualized one final-layer attention head.
-
-\subsubsection*{Outcome}
-Attention access succeeded. The model returned 12 attention tensors, one per Transformer layer, each shaped \texttt{[1, 12, 201, 201]} for the selected utterance.
-
-\subsubsection*{Remaining issues}
-Notebook 03 must confirm that these returned attention tensors retain usable, nonzero gradients for the original predicted-class logit.
-
-\subsection{Notebook 03 --- Attention Gradient Test}
-
-\subsubsection*{Purpose}
-Verify that gradients of a target class score with respect to Transformer attention maps can be obtained.
-
-\subsubsection*{Technical idea}
-LeGrad uses sensitivity to attention maps as its explanation signal. For speech, the target quantity is the classifier score for the original predicted emotion, and the required diagnostic is $\partial s_{\hat{y}}/\partial A_l$ for one or more Transformer layers. The repository now keeps two families separate: older hybrid rollout baselines multiply positive gradients by attention values before rollout, while the LeGrad-HuBERT modes in Notebook 04 use positive attention gradients directly as the relevance signal.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item The target is the original predicted-class logit or score.
-  \item Returned attention tensors will retain gradients during backpropagation.
-  \item Gradient shape, magnitude, finite values, and nonzero proportion will be checked before attribution aggregation.
-  \item Logits are preferred over probabilities when probability saturation weakens gradients.
-\end{itemize}
-
-\subsubsection*{What was tested}
-The notebook scaffold and reusable gradient-retention utilities are present.
-
-\subsubsection*{Outcome}
-The conceptual gradient path is defined. A real model forward and backward pass remains to be validated after Notebook 02 succeeds.
-
-\subsubsection*{Remaining issues}
-Gradient availability depends on how the wav2vec 2.0 attention implementation returns intermediate tensors. Hooks may be required if returned attentions are detached from the computational graph.
-
-\subsection{Notebook 04 --- LeGrad-Inspired Temporal Explanation}
-
-\subsubsection*{Purpose}
-Implement and validate explicit LeGrad-style HuBERT temporal relevance modes
-on one real IEMOCAP utterance.
-
-\subsubsection*{Technical idea}
-Notebook 04 now uses the implementation in
-\path{src/explainers/transformer_relevance/legrad_hubert.py}. The LeGrad-HuBERT
-modes compute the positive attention-gradient signal directly,
+where \(h\) indexes heads. The matrices are augmented with the identity, row-normalized, and multiplied through the Transformer stack to form the joint rollout matrix \(R\). Since HuBERT has no ViT-style class token, we average the final-token rows to get \texttt{rollout\_score}. In parallel, the classifier head gives \texttt{head\_relevance}: each token contribution is computed through the effective linear weight \(\texttt{classifier.weight}\times\texttt{projector.weight}\) under masked temporal mean pooling. The final method is
 \[
-\max(0, \partial s / \partial A_l),
+\texttt{level3}=\mathrm{normalize}(\texttt{rollout\_score}\odot\texttt{head\_relevance}).
 \]
-then reduce that signal over attention heads and temporal query positions before
-aggregating layers. Two score definitions are exposed: a final-score variant using the real HuBERT score
+Thus Level 3 uses rollout and gradient-times-attention; it is a hybrid Transformer relevance method, not LeGrad.
+
+\textbf{LeGrad-HuBERT variants.} LeGrad-HuBERT keeps the LeGrad distinction that mattered most in our discussion: it uses positive attention gradients directly and does not use rollout:
 \[
-s_c = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_{\mathrm{mix}})))_c
+L_l=\mathrm{mean}_{h,q}\left[
+\mathrm{ReLU}\left(\frac{\partial s}{\partial A_{l,h,q,:}}\right)
+\right].
 \]
-and a layer-local variant using
+The source/key token axis is kept as the temporal explanation axis. We evaluate the best LeGrad family in two layer-aggregation variants. In the \emph{layer-local} score, each Transformer output follows
 \[
-s_{l,c} = \mathrm{classifier}(\mathrm{pool}(\mathrm{projector}(H_l)))_c.
+H_l \rightarrow \text{projector} \rightarrow \text{masked temporal mean pooling}
+\rightarrow \text{classifier} \rightarrow s_{l,\hat{y}}.
 \]
-For both score definitions, relevance is reduced over heads and query tokens so
-that source/key temporal tokens remain as the explanation axis.
+This gives a score tied to layer \(l\), closer in spirit to LeGrad. We aggregate \(L_l\) either by a uniform mean over layers or by the renormalized HuBERT layer weights, where the \(H_0\) coefficient is dropped because \(H_0\) has no attention map and the remaining 12 coefficients are renormalized. Final-score variants are implemented in the repository, but the report focuses on layer-local variants because they were the strongest LeGrad-HuBERT results.
 
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item Four long, explicit mode names were added so result files identify the
-  score source, formula, layer aggregation, and token axis.
-  \item The implemented formula for LeGrad-HuBERT modes is
-  \texttt{ReLU(d score / d attention)}, not
-  \texttt{ReLU((d score / d attention) * attention)}.
-  \item Both mean layer aggregation and renormalized HuBERT-layer-weighted
-  aggregation are implemented, so the analysis can choose between a
-  LeGrad-like mean and a HuBERT-aware weighting.
-  \item Each mode returns sum-normalized temporal scores for quantitative
-  evaluation and min-max-normalized visual scores for paper-style plots.
-  \item The primary notebook visualization uses the layer-local score with
-  renormalized HuBERT layer weights, while the notebook also reports the
-  final-score variants.
-  \item Temporal outputs use small fixed-duration bins or token intervals that can participate in duration-matched deletion evaluation.
-\end{itemize}
-
-\subsubsection*{What was tested}
-Notebook 04 was executed on utterance \texttt{Ses01F\_impro01\_F005}. It loaded
-the HuBERT classifier, computed all four LeGrad-HuBERT modes, displayed the
-predicted-class logits, printed intermediate layer-relevance shapes, displayed
-the renormalized HuBERT layer weights and layer-local target logits, validated
-finite sum-normalized evaluation scores and min-max visual scores, listed the
-top temporal tokens, and rendered both a Notebook-01-style waveform relevance
-plot and the existing spectrogram timeline plot.
-
-\subsubsection*{Outcome}
-The notebook completed successfully. The selected utterance produced 12
-Transformer attention layers and 201 temporal tokens. Both
-\texttt{final\_score\_layer\_relevance} and
-\texttt{layer\_local\_score\_layer\_relevance} had shape
-\texttt{(1, 12, 201)}. The renormalized HuBERT Transformer-layer weights summed
-to 1.0, and each final temporal relevance vector summed to 1 within numerical
-tolerance.
-
-\subsubsection*{Remaining issues}
-The current token-to-time mapping remains the existing uniform approximation
-over the waveform duration. A later refinement could map HuBERT feature frames
-through the convolutional frontend stride and receptive field more explicitly.
-
-\subsection{Notebook 05 --- Level 3 Relevance Attribution Workflow}
-
-\subsubsection*{Purpose}
-Validate the rollout-based Level 3 attribution workflow on one real IEMOCAP
-utterance, using the same example as Notebook 04.
-
-\subsubsection*{Technical idea}
-Notebook 05 documents the hybrid Level 3 construction separately from
-LeGrad-HuBERT. For each Transformer layer, the layer matrix used by rollout is
-not the raw attention map. It is built as
+\textbf{Duration-matched deletion evaluation.} For each audio and each \(k\in\{1,2,3,5\}\), Pastor/SpeechXAI top-\(k\) words define a total removed duration \(X\). Level 3 and LeGrad-HuBERT then select their top HuBERT token intervals until the same duration \(X\) is reached. All methods silence their selected intervals without changing waveform length. The main metric is the confidence drop for the original predicted class:
 \[
-G_l =
-\mathrm{mean}_{\mathrm{heads}}\left(
-\max\left(0,\frac{\partial s_{\hat{y}}}{\partial A_l}\odot A_l\right)
-\right),
+\Delta p = p(\hat{y}\mid x)-p(\hat{y}\mid x_{\mathrm{masked}}).
 \]
-where \(s_{\hat{y}}\) is the predicted-class score and \(A_l\) is the attention
-map of layer \(l\). The matrices \(G_l\) are passed through residual-added,
-row-normalized attention rollout to obtain a temporal rollout score. That score
-is then multiplied by a lightweight classifier-head relevance term:
-\[
-R_{\mathrm{level3}} =
-\mathrm{normalize}\left(
-R_{\mathrm{rollout}} \odot R_{\mathrm{head}}
-\right).
-\]
-This is the key distinction from Notebook 04: Level 3 uses rollout and a
-gradient-times-attention product, while LeGrad-HuBERT uses positive attention
-gradients directly and does not use rollout.
+Higher \(\Delta p\) means the selected region was more important for the model's original decision. A random deletion by silence masking baseline selects duration-matched random bins and runs 20 trials per audio.
 
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item The Level 3 workflow is kept in its own notebook so it is not confused
-  with the LeGrad-HuBERT implementation.
-  \item The notebook exposes the intermediate tensors
-  \texttt{grad\_attentions}, \texttt{joint\_attention},
-  \texttt{rollout\_score}, \texttt{head\_relevance}, and
-  \texttt{scores["level3"]}.
-  \item The final evaluation score remains sum-normalized, while a min-max
-  score is used only for visual contrast in plots.
-  \item The same utterance, \texttt{Ses01F\_impro01\_F005}, is used so the
-  LeGrad-HuBERT and Level 3 notebooks can be compared directly.
-\end{itemize}
+\section{Experiments and Analysis}
 
-\subsubsection*{What was tested}
-Notebook 05 was executed on \texttt{Ses01F\_impro01\_F005}. It loaded the
-HuBERT classifier, captured forward attentions and classifier-head inputs,
-computed target-class attention gradients, built all layer-level
-gradient-times-attention matrices, computed rollout and head relevance, and
-verified that a manual reconstruction of
-\texttt{normalize(rollout\_score * head\_relevance)} exactly matched
-\texttt{scores["level3"]}.
+We evaluate IEMOCAP and RAVDESS separately. The available IEMOCAP run is partial and must not be described as a full-dataset result: it keeps 5460 audios out of 5531 expected, with one incomplete audio after filtering. The available RAVDESS run keeps 671 audios out of 672 expected. Table \ref{tab:main-results} reports mean confidence drop; numbers in parentheses are the relative change compared with Pastor/SpeechXAI at the same dataset and \(k\).
 
-\subsubsection*{Outcome}
-The notebook completed successfully. The selected utterance was predicted as
-\texttt{ang}, produced 12 Transformer attention layers and 201 temporal tokens,
-and the maximum absolute difference between the manual Level 3 reconstruction
-and the project implementation was 0.0. The notebook also displays top temporal
-tokens and renders both the spectrogram relevance timeline and the
-Notebook-01-style waveform interval plot.
-
-\subsubsection*{Remaining issues}
-Level 3 remains a hybrid rollout baseline rather than a LeGrad reproduction.
-The same uniform token-to-time mapping approximation used elsewhere in the
-project also applies here.
-
-\subsection{Notebook 06 --- Quantitative Evaluation}
-
-\subsubsection*{Purpose}
-Run the complete multi-audio comparison in one coherent experiment. This notebook owns batch explanation generation, common interval representation, equal-duration masking, deletion metrics, and aggregate quantitative plots.
-
-\subsubsection*{Technical idea}
-The validated SpeechXAI workflow from Notebook 01, LeGrad-HuBERT workflow from
-Notebook 04, and Level 3 workflow from Notebook 05 are applied to the same
-controlled evaluation protocol. SpeechXAI top-$k$ words define a union duration
-\(X\). SpeechXAI masks, HuBERT explanation top bins, and repeated random bins
-are then compared after silencing exactly \(X\) seconds while preserving
-waveform length.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item Batch SpeechXAI generation is part of evaluation rather than a separate notebook because its single-audio behavior is already established in Notebook 01.
-  \item Interval unification and masking are part of the evaluation operation rather than independent experimental outcomes.
-  \item Both explanation methods use the common columns \texttt{audio\_id}, \texttt{start}, \texttt{end}, and \texttt{score}.
-  \item SpeechXAI is the source of duration $X$ because its native unit is a variable-duration word.
-  \item Top-$k$ values are $1$, $2$, $3$, and $5$.
-  \item HuBERT explanation bins are selected by score until their union duration reaches $X$.
-  \item Random bins use the same duration and are repeated 20 times.
-  \item The main metric is absolute confidence drop for the original predicted class.
-  \item Relative confidence drop and prediction flip rate are secondary metrics.
-  \item Aggregate tables, deletion curves, boxplots, duration checks, and flip rates remain in this notebook because they are direct outputs of the quantitative experiment.
-\end{itemize}
-
-\subsubsection*{What was tested}
-Notebook 01 validated real SpeechXAI attribution, silence masking,
-union-duration accounting, confidence drop, and repeated same-duration random
-masking on one utterance. The consolidated Notebook 06 contains the protocol
-scaffold that extends those validated operations to SpeechXAI, Level 3, and
-LeGrad-HuBERT modes across the evaluation set.
-
-\subsubsection*{Outcome}
-The evaluation schema and fairness constraints are defined and validated at single-audio scale. The previous standalone SpeechXAI, interval-masking, deletion, and final-summary placeholders have been removed because their responsibilities now belong to this one quantitative experiment.
-
-\subsubsection*{Remaining issues}
-The complete run requires the working LeGrad-HuBERT example from Notebook 04,
-the Level 3 example from Notebook 05, a documented evaluation set, and execution
-across all selected audios.
-
-\subsection{Notebook 07 --- Qualitative Examples}
-
-\subsubsection*{Purpose}
-Create interpretable examples that show where SpeechXAI and LeGrad agree or disagree and how masking changes model confidence.
-
-\subsubsection*{Technical idea}
-Each example combines the waveform, word-level SpeechXAI intervals, the LeGrad temporal relevance curve, selected masking regions, and before/after classifier confidence.
-
-\subsubsection*{Decisions made}
-\begin{itemize}
-  \item Examples will be selected from quantitative outcomes rather than chosen only for visual appeal.
-  \item The final set should include agreement, LeGrad-favored, SpeechXAI-favored, and difficult cases.
-  \item Interpretations will distinguish model faithfulness from human plausibility.
-\end{itemize}
-
-\subsubsection*{What was tested}
-The notebook structure and plotting requirements have been defined.
-
-\subsubsection*{Outcome}
-The qualitative analysis plan is ready.
-
-\subsubsection*{Remaining issues}
-Representative cases can be selected after Notebook 06 produces the complete
-deletion results. Aggregate tables remain in Notebook 06; this notebook is
-reserved for case-level interpretation.
-
-\section{Evaluation Design}
-
-The final quantitative evaluation follows these steps:
-
-\begin{enumerate}
-  \item SpeechXAI returns importance scores for word-aligned audio segments.
-  \item For each audio and each $k \in \{1,2,3,5\}$, the top-$k$ SpeechXAI words are selected.
-  \item The selected words define a total duration $X$ seconds.
-  \item Those SpeechXAI word intervals are replaced by silence, and the confidence drop for the original predicted class is measured.
-  \item HuBERT explanation time bins are ranked by relevance, and the highest-ranked bins whose total duration equals $X$ are selected.
-  \item Those HuBERT explanation regions are replaced by silence, and the same confidence drop is measured.
-  \item Random time bins with total duration $X$ are selected repeatedly to form a random deletion by silence masking baseline.
-  \item All methods use the same audio, classifier, target class, masking operation, and removed duration.
-\end{enumerate}
-
-SpeechXAI naturally explains words, while the LeGrad-inspired method explains Transformer time bins or tokens. Equalizing the total occluded duration makes the comparison focus on where each method assigns relevance.
-
-The main metric is:
-
-\[
-\mathrm{drop}
-= p_{\mathrm{original}}(\hat{y})
-- p_{\mathrm{masked}}(\hat{y}),
-\]
-
-where $\hat{y}$ is the class predicted from the original audio. Secondary metrics are relative confidence drop and prediction flip rate. Mean masked duration is reported for every top-$k$ setting.
-
-\section{Methodological Decisions Summary}
-
-\begin{longtable}{p{0.20\textwidth} p{0.34\textwidth} p{0.38\textwidth}}
+\begin{table}[h]
+\centering
+\scriptsize
+\begin{tabular}{@{}llcccc@{}}
 \toprule
-\textbf{Component} & \textbf{Decision} & \textbf{Reason} \\
+Dataset & \(k\) & Pastor & Level 3 & LeGrad layer-local, HuBERT-w. & LeGrad layer-local, mean \\
 \midrule
-Dataset & IEMOCAP speech, transcripts, and emotion labels & It is a standard speech emotion resource and provides the audio and annotations required by the selected classifier. \\
-
-Classifier & SUPERB \texttt{wav2vec2-base-superb-er} checkpoint used by SpeechXAI & Using the same classifier removes model choice as a confound when comparing SpeechXAI and LeGrad-inspired explanations. \\
-
-Model label space & Anger, happiness/excitement, neutral, sadness & These are the four outputs supported by the selected pretrained classifier. \\
-
-Target class & Original predicted class & Faithfulness is evaluated relative to the model decision being explained. \\
-
-SpeechXAI unit & Word-aligned audio segments & This is SpeechXAI's native, human-readable explanation unit. \\
-
-LeGrad unit & Transformer tokens or fixed temporal bins & Attention-gradient relevance is naturally produced at the encoder-token level. \\
-
-LeGrad-HuBERT formulation & Positive attention gradients; final-score and layer-local score variants are both implemented & This is the explicit HuBERT adaptation of the LeGrad reduction, while the older gradient-attention rollout modes remain available as baselines. \\
-
-Shared duration & $X$ seconds from SpeechXAI top-$k$ words & This makes word-level and time-bin explanations comparable under equal audio removal. \\
-
-Top-$k$ values & $1$, $2$, $3$, and $5$ words & These settings provide a compact deletion curve while respecting SpeechXAI's native output. \\
-
-Masking method & Silence replacement with unchanged waveform length & It provides a simple perturbation and avoids duration changes that could independently affect the classifier. \\
-
-Random baseline & Same-duration random bins, repeated 20 times & Repetition estimates baseline variance and provides a stable reference. \\
-
-Main metric & Confidence drop for the original predicted class & It measures how strongly the selected regions support the model's original decision. \\
-
-Secondary metrics & Relative confidence drop and prediction flip rate & They complement absolute confidence drop across samples with different confidence levels. \\
-
-Notebook 01 scope & One utterance, in-memory outputs & It establishes an understandable baseline and avoids mixing pipeline validation with dataset-scale evaluation. \\
+IEMOCAP & 1 & 0.115 & 0.128 (+12.0\%) & 0.106 (-7.3\%) & 0.105 (-8.7\%) \\
+IEMOCAP & 2 & 0.159 & 0.181 (+13.8\%) & 0.155 (-2.4\%) & 0.153 (-3.4\%) \\
+IEMOCAP & 3 & 0.183 & 0.215 (+17.2\%) & 0.185 (+1.1\%) & 0.183 (+0.1\%) \\
+IEMOCAP & 5 & 0.207 & 0.256 (+23.7\%) & 0.221 (+7.0\%) & 0.220 (+6.4\%) \\
+RAVDESS & 1 & 0.109 & 0.104 (-4.4\%) & 0.161 (+47.7\%) & 0.163 (+49.5\%) \\
+RAVDESS & 2 & 0.199 & 0.216 (+9.0\%) & 0.327 (+64.5\%) & 0.328 (+65.0\%) \\
+RAVDESS & 3 & 0.249 & 0.282 (+13.1\%) & 0.413 (+65.8\%) & 0.412 (+65.4\%) \\
+RAVDESS & 5 & 0.227 & 0.342 (+50.6\%) & 0.433 (+90.5\%) & 0.429 (+88.9\%) \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\caption{Duration-matched deletion results. Pastor/SpeechXAI uses word intervals; Level 3 and LeGrad-HuBERT use HuBERT token intervals selected to match the same removed duration.}
+\label{tab:main-results}
+\end{table}
+
+The current evidence suggests two different regimes. On IEMOCAP, Level 3 is the strongest method across all \(k\), improving over Pastor/SpeechXAI by 12.0\% to 23.7\%. LeGrad layer-local variants become competitive only when more duration is removed, especially at \(k=3\) and \(k=5\). On RAVDESS, LeGrad layer-local variants dominate, with gains above 47\% for every \(k\), while Level 3 is weaker at \(k=1\) and improves as the removed duration grows. This supports the project hypothesis that finer temporal granularity can improve deletion faithfulness, but it also shows that the best gradient-based construction depends on the dataset and audio distribution.
+
+\textbf{Additional evaluation to be inserted from Notebook 07.} We prepared extra tests for the report but did not run the full evaluation yet. This space is reserved for deletion faithfulness/AOPC and class-specificity results over the selected report methods.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Notebook 07 metric & Level 3 & LeGrad HuBERT-w. & LeGrad mean \\
+\midrule
+Deletion faithfulness / AOPC & \multicolumn{3}{c}{[full-run value to insert]} \\
+Class specificity & \multicolumn{3}{c}{[full-run value to insert]} \\
+Sparsity or concentration & \multicolumn{3}{c}{[full-run value to insert]} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Main conclusion.} Pastor/SpeechXAI remains the most interpretable explanation because words are directly understandable. Our best gradient-based methods are less semantic but often more faithful under duration-matched deletion. The strongest report claim should therefore be measured: gradient-based HuBERT token attribution can outperform word-level Pastor/SpeechXAI on confidence-drop faithfulness, especially for RAVDESS and for larger removal budgets, while Level 3 is currently the most reliable method on the partial IEMOCAP run.
+
+\begin{thebibliography}{9}
+\small
+
+\bibitem{pastor2024speechxai}
+Eliana Pastor, Alkis Koudounas, Giuseppe Attanasio, Dirk Hovy, and Elena Baralis.
+\newblock Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features.
+\newblock EACL 2024.
+\newblock \url{https://aclanthology.org/2024.eacl-long.136/}
+
+\bibitem{poeta2024concept}
+Eleonora Poeta, Gabriele Ciravegna, Eliana Pastor, Tania Cerquitelli, and Elena Baralis.
+\newblock Concept-based Explainable Artificial Intelligence: A Survey.
+\newblock arXiv:2312.12936, 2023.
+\newblock \url{https://arxiv.org/abs/2312.12936}
+
+\bibitem{bousselham2024legrad}
+Walid Bousselham, Angie Boggust, Sofian Chaybouti, Hendrik Strobelt, and Hilde Kuehne.
+\newblock LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity.
+\newblock arXiv:2404.03214, 2024.
+\newblock \url{https://arxiv.org/abs/2404.03214}
+
+\bibitem{abnar2020rollout}
+Samira Abnar and Willem Zuidema.
+\newblock Quantifying Attention Flow in Transformers.
+\newblock ACL 2020.
+\newblock \url{https://aclanthology.org/2020.acl-main.385/}
+
+\bibitem{hsu2021hubert}
+Wei-Ning Hsu, Benjamin Bolte, Yao-Hung Hubert Tsai, Kushal Lakhotia, Ruslan Salakhutdinov, and Abdelrahman Mohamed.
+\newblock HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units.
+\newblock IEEE/ACM TASLP, 2021.
+\newblock \url{https://arxiv.org/abs/2106.07447}
+
+\bibitem{yang2021superb}
+Shu-wen Yang et al.
+\newblock SUPERB: Speech Processing Universal PERformance Benchmark.
+\newblock Interspeech 2021.
+\newblock \url{https://arxiv.org/abs/2105.01051}
+
+\end{thebibliography}
 
 \end{document}
