@@ -1,0 +1,202 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.68in]{geometry}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.25em}
+\setlist{nosep,leftmargin=*}
+\renewcommand{\arraystretch}{1.08}
+
+\title{\vspace{-1.4em}Gradient-Based Temporal Explanations for Speech Emotion Recognition}
+\author{gradient\_based\_speach\_xai}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.6em}
+
+\section{Introduction}
+
+Speech emotion recognition models make utterance-level decisions from a signal that mixes lexical content, prosody, pauses, speaker variation, and background conditions. Pastor et al.'s SpeechXAI work addresses this interpretability problem with an intuitive perturbation protocol: align words in the audio, silence each word-related segment, and measure how much the target-class probability changes \cite{pastor2024speechxai}. Their explanation unit is therefore a spoken word, which is easy to inspect and discuss.
+
+Our project asks a narrower research question: \textbf{do model-specific gradient-based temporal attributions identify more decision-relevant regions than Pastor/SpeechXAI word-level attributions?} We also test what is gained or lost by moving from word granularity to smaller HuBERT token intervals. The comparison is not between different classifiers. SpeechXAI/Pastor, Level 3, and LeGrad-HuBERT are all evaluated on the same HuBERT model and the same masking operation.
+
+\section{Related Work}
+
+Pastor et al. position SpeechXAI against the broader XAI literature in vision, language, and tabular data, including gradient saliency, Integrated Gradients, Grad-CAM, LIME, SHAP, and occlusion-style perturbation methods \cite{pastor2024speechxai}. For speech, they emphasize that many previous explanations are time-frequency heatmaps or phoneme/fixed-frame analyses, which may be less accessible for non-expert users or less suitable for semantically intensive speech classification tasks. Their method follows an input-perturbation view: the relevance of an audio segment is the probability difference between the original utterance and the utterance with that segment masked.
+
+The empirical setting uses two standard acted-emotion speech corpora. IEMOCAP contains dyadic scripted and improvised emotional interactions and is widely used in speech emotion recognition \cite{busso2008iemocap}. RAVDESS contains controlled North American English emotional speech recordings, giving a cleaner complementary benchmark \cite{livingstone2018ravdess}. The classifier is a SUPERB HuBERT emotion-recognition checkpoint: HuBERT learns speech representations by masked prediction of hidden units, and SUPERB provides standardized downstream speech benchmarks and checkpoints \cite{hsu2021hubert,yang2021superb}. This lets the project focus on explanation quality rather than training a new emotion classifier.
+
+Our work keeps Pastor's faithfulness question but changes the explanation source. Level 3 is a Transformer attention-flow attribution inspired by attention rollout \cite{abnar2020rollout} and class-specific head relevance. LeGrad-HuBERT adapts the LeGrad idea, which treats positive gradients with respect to attention maps as the explanation signal, originally proposed for Vision Transformers \cite{bousselham2024legrad}. In Pastor et al.'s concept-based XAI taxonomy \cite{poeta2024concept}, SpeechXAI's word segments are close to \emph{post-hoc, local, symbolic class-concept relations}: each spoken word is a human-readable concept whose effect on a class is measured. Our methods are more fine-grained and model-specific: they are \emph{post-hoc, local, gradient-based temporal feature attributions} for Transformer audio tokens. They become concept-level explanations only if the selected token intervals are later grouped into words or higher-level speech concepts.
+
+\section{Research Gaps}
+
+Pastor/SpeechXAI gives explanations that are easy to read, but the word is a coarse unit. A word can contain several acoustic events, and emotion classifiers may rely on pauses, emphasis, hesitation, pitch, or short stressed regions that are not aligned with whole words. Conversely, token-level gradient methods can find smaller regions, but those regions are less immediately meaningful to humans. This creates the main gap studied here: \textbf{the trade-off between interpretability by word-level concepts and faithfulness by finer temporal granularity.}
+
+A second gap is architectural. LeGrad was designed for Vision Transformers, where patch tokens remain in a visual-token pathway. The HuBERT sequence classifier used here has a different head:
+\[
+\text{waveform} \rightarrow \text{HuBERT hidden states } H_0,\ldots,H_{12}
+\rightarrow H_{\mathrm{mix}} \rightarrow \text{projector}
+\rightarrow \text{masked temporal mean pooling}
+\rightarrow \text{classifier}.
+\]
+When weighted layer aggregation is active, the model computes
+\[
+H_{\mathrm{mix}}=\sum_{l=0}^{12}\mathrm{softmax}(\alpha)_l H_l.
+\]
+The stored \(\alpha_l\) values are forward mixture parameters, not class-specific relevance scores. They say how much the trained head mixes each hidden-state tensor into \(H_{\mathrm{mix}}\), while LeGrad needs a scalar class score whose gradient can flow back to an attention map. This is why we evaluate explicit HuBERT adaptations rather than claiming a direct copy of the original ViT method.
+
+\section{Methodology}
+
+\textbf{Model and target.} The implemented pipeline loads the HuBERT checkpoint \texttt{superb/\allowbreak hubert-base-superb-er}, with 12 Transformer layers, 12 heads, 768 hidden dimensions, a 256-dimensional projector, masked temporal mean pooling, and four emotion labels: neutral, happy/excited, angry, and sad \cite{hsu2021hubert,yang2021superb}. Every explanation targets the model's original predicted class \(\hat{y}\), not necessarily the dataset ground-truth label. This is important because the explanation is about the model decision being evaluated.
+
+\textbf{Pastor/SpeechXAI baseline.} We reproduce the word-level SpeechXAI protocol as the baseline method. WhisperX provides word timestamps, each word interval is silenced, and the score is
+\[
+r(x_i)=p(\hat{y}\mid x)-p(\hat{y}\mid x\setminus x_i).
+\]
+The implementation follows the SpeechXAI repository behavior by applying the word mask in the waveform domain: the effective interval starts 100 ms before the aligned word and ends 40 ms after it, clipped to the audio boundaries. This produces word scores, ranked word intervals, and a human-readable explanation.
+
+\textbf{Level 3 relevance.} Level 3 is the strongest rollout-based method retained for the report, but it is not default raw-attention rollout. Default rollout composes attention probabilities; our code first builds class-conditioned matrices from positive gradient-times-attention. For each HuBERT layer \(l\), attention probabilities \(A_l\) and their target-logit gradients are captured. The layer matrix is
+\[
+G_l=\mathrm{mean}_{h}\left[\mathrm{ReLU}\left(
+\frac{\partial s_{\hat{y}}}{\partial A_{l,h}}\odot A_{l,h}
+\right)\right],
+\]
+where \(h\) indexes heads. The matrices are augmented with the identity, row-normalized, and multiplied through the Transformer stack to form the joint rollout matrix \(R\). Since HuBERT has no ViT-style class token, we average the final-token rows to get \texttt{rollout\_score}. In parallel, the classifier head gives \texttt{head\_relevance}: each token contribution is computed through the effective linear weight \(\texttt{classifier.weight}\times\texttt{projector.weight}\) under masked temporal mean pooling. The final method is
+\[
+\texttt{level3}=\mathrm{normalize}(\texttt{rollout\_score}\odot\texttt{head\_relevance}).
+\]
+Thus Level 3 uses rollout and gradient-times-attention; it is a hybrid Transformer relevance method, not LeGrad.
+
+\textbf{LeGrad-HuBERT variants.} LeGrad-HuBERT keeps the LeGrad distinction that mattered most in our discussion: it uses positive attention gradients directly and does not use rollout:
+\[
+L_l=\mathrm{mean}_{h,q}\left[
+\mathrm{ReLU}\left(\frac{\partial s}{\partial A_{l,h,q,:}}\right)
+\right].
+\]
+The source/key token axis is kept as the temporal explanation axis. We evaluate the best LeGrad family in two layer-aggregation variants. In the \emph{layer-local} score, each Transformer output follows
+\[
+H_l \rightarrow \text{projector} \rightarrow \text{masked temporal mean pooling}
+\rightarrow \text{classifier} \rightarrow s_{l,\hat{y}}.
+\]
+This gives a score tied to layer \(l\), closer in spirit to LeGrad. We aggregate \(L_l\) either by a uniform mean over layers or by the renormalized HuBERT layer weights, where the \(H_0\) coefficient is dropped because \(H_0\) has no attention map and the remaining 12 coefficients are renormalized. Final-score variants are implemented in the repository, but the report focuses on layer-local variants because they were the strongest LeGrad-HuBERT results.
+
+\textbf{Deletion with the same time removed.} For each audio and each \(k\in\{1,2,3,5\}\), Pastor/SpeechXAI top-\(k\) words define a total amount of audio time \(X\) to remove. HuBERT token relevance vectors are first mapped to equal-width intervals over the full waveform duration; Level 3 and LeGrad-HuBERT then select their top intervals until they remove the same amount of time \(X\). All methods silence their selected intervals without changing waveform length. The main metric is the confidence drop for the original predicted class:
+\[
+\Delta p = p(\hat{y}\mid x)-p(\hat{y}\mid x_{\mathrm{masked}}).
+\]
+Higher \(\Delta p\) means the selected region was more important for the model's original decision. A random deletion by silence masking baseline selects random bins with the same total removed time and runs 20 trials per audio.
+
+\section{Experiments and Analysis}
+
+We evaluate IEMOCAP and RAVDESS separately. The available IEMOCAP run is partial and must not be described as a full-dataset result: it keeps 5460 audios out of 5531 expected, with one incomplete audio after filtering. The available RAVDESS run keeps 671 audios out of 672 expected. Table \ref{tab:main-results} reports mean confidence drop; numbers in parentheses are the relative change compared with Pastor/SpeechXAI at the same dataset and \(k\).
+
+\begin{table}[h]
+\centering
+\scriptsize
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+Dataset & \(k\) & Pastor & Level 3 & LeGrad layer-local, HuBERT-w. & LeGrad layer-local, mean \\
+\multicolumn{2}{@{}l}{Metric} & \multicolumn{4}{c@{}}{Mean confidence drop \(\Delta p\); relative change vs. Pastor/SpeechXAI in parentheses} \\
+\midrule
+IEMOCAP & 1 & 0.115 & 0.128 (+12.0\%) & 0.106 (-7.3\%) & 0.105 (-8.7\%) \\
+IEMOCAP & 2 & 0.159 & 0.181 (+13.8\%) & 0.155 (-2.4\%) & 0.153 (-3.4\%) \\
+IEMOCAP & 3 & 0.183 & 0.215 (+17.2\%) & 0.185 (+1.1\%) & 0.183 (+0.1\%) \\
+IEMOCAP & 5 & 0.207 & 0.256 (+23.7\%) & 0.221 (+7.0\%) & 0.220 (+6.4\%) \\
+RAVDESS & 1 & 0.109 & 0.104 (-4.4\%) & 0.161 (+47.7\%) & 0.163 (+49.5\%) \\
+RAVDESS & 2 & 0.199 & 0.216 (+9.0\%) & 0.327 (+64.5\%) & 0.328 (+65.0\%) \\
+RAVDESS & 3 & 0.249 & 0.282 (+13.1\%) & 0.413 (+65.8\%) & 0.412 (+65.4\%) \\
+RAVDESS & 5 & 0.227 & 0.342 (+50.6\%) & 0.433 (+90.5\%) & 0.429 (+88.9\%) \\
+\bottomrule
+\end{tabular}
+\caption{Deletion results with the same amount of audio time removed, measured by mean confidence drop \(\Delta p=p(\hat{y}\mid x)-p(\hat{y}\mid x_{\mathrm{masked}})\). Pastor/SpeechXAI uses word intervals; Level 3 and LeGrad-HuBERT use HuBERT token intervals selected to remove the same total time.}
+\label{tab:main-results}
+\end{table}
+
+The current evidence suggests two different regimes. On IEMOCAP, Level 3 is the strongest method across all \(k\), improving over Pastor/SpeechXAI by 12.0\% to 23.7\%. LeGrad layer-local variants become competitive only when more duration is removed, especially at \(k=3\) and \(k=5\). On RAVDESS, LeGrad layer-local variants dominate, with gains above 47\% for every \(k\), while Level 3 is weaker at \(k=1\) and improves as the removed duration grows. This supports the project hypothesis that finer temporal granularity can improve deletion faithfulness, but it also shows that the best gradient-based construction depends on the dataset and audio distribution.
+
+\textbf{Additional evaluation to be inserted from Notebook 07.} We prepared extra tests for the report but did not run the full evaluation yet. This space is reserved for deletion faithfulness/AOPC and class-specificity results over the selected report methods.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Notebook 07 metric & Level 3 & LeGrad HuBERT-w. & LeGrad mean \\
+\midrule
+Deletion faithfulness / AOPC & \multicolumn{3}{c}{[full-run value to insert]} \\
+Class specificity & \multicolumn{3}{c}{[full-run value to insert]} \\
+Sparsity or concentration & \multicolumn{3}{c}{[full-run value to insert]} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Main conclusion.} Pastor/SpeechXAI remains the most interpretable explanation because words are directly understandable. Our best gradient-based methods are less semantic but often more faithful when every method removes the same amount of audio time. The strongest report claim should therefore be measured: gradient-based HuBERT token attribution can outperform word-level Pastor/SpeechXAI on confidence-drop faithfulness, especially for RAVDESS and for larger removal budgets, while Level 3 is currently the most reliable method on the partial IEMOCAP run.
+
+\begin{thebibliography}{9}
+\small
+
+\bibitem{pastor2024speechxai}
+Eliana Pastor, Alkis Koudounas, Giuseppe Attanasio, Dirk Hovy, and Elena Baralis.
+\newblock Explaining Speech Classification Models via Word-Level Audio Segments and Paralinguistic Features.
+\newblock EACL 2024.
+\newblock \url{https://aclanthology.org/2024.eacl-long.136/}
+
+\bibitem{poeta2024concept}
+Eleonora Poeta, Gabriele Ciravegna, Eliana Pastor, Tania Cerquitelli, and Elena Baralis.
+\newblock Concept-based Explainable Artificial Intelligence: A Survey.
+\newblock arXiv:2312.12936, 2023.
+\newblock \url{https://arxiv.org/abs/2312.12936}
+
+\bibitem{busso2008iemocap}
+Carlos Busso et al.
+\newblock IEMOCAP: Interactive Emotional Dyadic Motion Capture Database.
+\newblock Language Resources and Evaluation, 2008.
+\newblock \url{https://sail.usc.edu/iemocap/}
+
+\bibitem{livingstone2018ravdess}
+Steven R. Livingstone and Frank A. Russo.
+\newblock The Ryerson Audio-Visual Database of Emotional Speech and Song (RAVDESS).
+\newblock PLOS ONE, 2018.
+\newblock \url{https://doi.org/10.1371/journal.pone.0196391}
+
+\bibitem{bousselham2024legrad}
+Walid Bousselham, Angie Boggust, Sofian Chaybouti, Hendrik Strobelt, and Hilde Kuehne.
+\newblock LeGrad: An Explainability Method for Vision Transformers via Feature Formation Sensitivity.
+\newblock arXiv:2404.03214, 2024.
+\newblock \url{https://arxiv.org/abs/2404.03214}
+
+\bibitem{abnar2020rollout}
+Samira Abnar and Willem Zuidema.
+\newblock Quantifying Attention Flow in Transformers.
+\newblock ACL 2020.
+\newblock \url{https://aclanthology.org/2020.acl-main.385/}
+
+\bibitem{hsu2021hubert}
+Wei-Ning Hsu, Benjamin Bolte, Yao-Hung Hubert Tsai, Kushal Lakhotia, Ruslan Salakhutdinov, and Abdelrahman Mohamed.
+\newblock HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units.
+\newblock IEEE/ACM TASLP, 2021.
+\newblock \url{https://arxiv.org/abs/2106.07447}
+
+\bibitem{yang2021superb}
+Shu-wen Yang et al.
+\newblock SUPERB: Speech Processing Universal PERformance Benchmark.
+\newblock Interspeech 2021.
+\newblock \url{https://arxiv.org/abs/2105.01051}
+
+\end{thebibliography}
+
+\end{document}
