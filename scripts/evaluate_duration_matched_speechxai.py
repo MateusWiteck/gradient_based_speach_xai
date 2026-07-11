@@ -9,11 +9,14 @@ receives that same duration.
 from __future__ import annotations
 
 import argparse
+import errno
 import importlib.metadata as importlib_metadata
+import os
 import platform
 from pathlib import Path
 import subprocess
 import sys
+import time
 import traceback
 
 import pandas as pd
@@ -64,6 +67,36 @@ REPRODUCIBILITY_PACKAGES = (
     "imageio-ffmpeg",
     "pyyaml",
 )
+
+SUMMARY_NUMERIC_COLUMNS = (
+    "true_class",
+    "session_id",
+    "actor_id",
+    "k",
+    "requested_duration",
+    "masked_duration",
+    "duration_error",
+    "original_class",
+    "target_class",
+    "original_confidence",
+    "masked_confidence",
+    "confidence_drop",
+    "relative_confidence_drop",
+    "masked_predicted_class",
+    "random_trial",
+    "token_count",
+    "word_count",
+)
+UNSUPPORTED_FSYNC_ERRNOS = {
+    errno_value
+    for errno_value in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if errno_value is not None
+}
+_FSYNC_WARNING_SHOWN = False
 
 
 def _relative_to_or_string(path: Path, root: Path) -> str:
@@ -125,6 +158,40 @@ def _ffmpeg_version() -> str | None:
     if not version_text:
         return None
     return version_text.splitlines()[0] if version_text.splitlines() else None
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "unknown"
+    seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _progress_suffix(
+    *,
+    index: int,
+    total: int,
+    started_at: float,
+    completed: int,
+    skipped: int,
+    failed: int,
+) -> str:
+    elapsed = time.monotonic() - started_at
+    average_seconds = elapsed / index if index else None
+    remaining = max(total - index, 0)
+    eta = average_seconds * remaining if average_seconds is not None else None
+    percent = 100.0 * index / total if total else 100.0
+    return (
+        f"[{index}/{total} {percent:6.2f}%] "
+        f"elapsed={_format_duration(elapsed)} "
+        f"avg/audio={_format_duration(average_seconds)} "
+        f"eta={_format_duration(eta)} "
+        f"completed={completed} skipped={skipped} failed={failed}"
+    )
 
 
 def collect_reproducibility_metadata(*, speechxai_root: str | Path) -> dict[str, object]:
@@ -236,11 +303,137 @@ def filter_examples(
     return selected
 
 
-def append_frame(path: Path, frame: pd.DataFrame) -> None:
+def append_frame(path: Path, frame: pd.DataFrame) -> int:
+    global _FSYNC_WARNING_SHOWN  # noqa: PLW0603
+
     if frame.empty:
-        return
+        return 0
     path.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(path, mode="a", header=not path.exists(), index=False)
+    needs_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", encoding="utf-8", newline="") as output_file:
+        frame.to_csv(output_file, header=needs_header, index=False)
+        output_file.flush()
+        try:
+            os.fsync(output_file.fileno())
+        except OSError as error:
+            if error.errno not in UNSUPPORTED_FSYNC_ERRNOS:
+                raise
+            if not _FSYNC_WARNING_SHOWN:
+                print(
+                    "WARNING: this filesystem does not support os.fsync(); "
+                    "CSV rows are still flushed and the file handle is closed "
+                    "after each append.",
+                    flush=True,
+                )
+                _FSYNC_WARNING_SHOWN = True
+    return int(len(frame))
+
+
+def audio_progress_record(
+    *,
+    example: AudioEvaluationExample,
+    index: int,
+    total: int,
+    status: str,
+    started_at: float,
+    completed: int,
+    skipped: int,
+    failed: int,
+    original_prediction,
+    original_prediction_rows: int = 0,
+    deletion_rows: int = 0,
+    word_score_rows: int = 0,
+    selected_interval_rows: int = 0,
+    failure_rows: int = 0,
+    total_original_prediction_rows: int = 0,
+    total_deletion_rows: int = 0,
+    total_word_score_rows: int = 0,
+    total_selected_interval_rows: int = 0,
+    total_failure_rows: int = 0,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        **example.to_record(),
+        "audio_index": index,
+        "selected_audio_count": total,
+        "status": status,
+        "elapsed_seconds": time.monotonic() - started_at,
+        "completed_audio_count": completed,
+        "skipped_audio_count": skipped,
+        "failed_audio_count": failed,
+        "original_prediction_rows_written": original_prediction_rows,
+        "duration_matched_rows_written": deletion_rows,
+        "speechxai_word_rows_written": word_score_rows,
+        "selected_interval_rows_written": selected_interval_rows,
+        "failure_rows_written": failure_rows,
+        "total_original_prediction_rows_written": total_original_prediction_rows,
+        "total_duration_matched_rows_written": total_deletion_rows,
+        "total_speechxai_word_rows_written": total_word_score_rows,
+        "total_selected_interval_rows_written": total_selected_interval_rows,
+        "total_failure_rows_written": total_failure_rows,
+        "error_type": error_type,
+        "error_message": error_message,
+    }
+    if original_prediction is None:
+        record.update(
+            {
+                "predicted_class": None,
+                "predicted_label": None,
+                "target_class": None,
+                "target_label": None,
+                "target_confidence": None,
+            }
+        )
+    else:
+        record.update(
+            {
+                "predicted_class": original_prediction.predicted_class,
+                "predicted_label": original_prediction.predicted_label,
+                "target_class": original_prediction.target_class,
+                "target_label": original_prediction.target_label,
+                "target_confidence": original_prediction.target_confidence,
+            }
+        )
+    return record
+
+
+def read_duration_matched_records(path: Path) -> pd.DataFrame:
+    """Read incremental deletion records robustly enough to summarize partial runs."""
+    records = pd.read_csv(path, dtype=str, low_memory=False)
+    if records.empty:
+        return records
+
+    # Google Drive backed runs can occasionally contain repeated CSV headers after
+    # interrupted or manually resumed executions. They turn numeric columns into
+    # object columns and break the final groupby mean.
+    header_rows = pd.Series(False, index=records.index)
+    for column in records.columns:
+        header_rows |= records[column].eq(column)
+    if header_rows.any():
+        removed_count = int(header_rows.sum())
+        print(
+            f"Removed {removed_count} repeated header row(s) from {path.name}.",
+            flush=True,
+        )
+        records = records.loc[~header_rows].copy()
+
+    for column in SUMMARY_NUMERIC_COLUMNS:
+        if column in records.columns:
+            records[column] = pd.to_numeric(records[column], errors="coerce")
+
+    if "prediction_flipped" in records.columns:
+        normalized = records["prediction_flipped"].astype(str).str.strip().str.lower()
+        records["prediction_flipped"] = normalized.map(
+            {
+                "true": 1.0,
+                "false": 0.0,
+                "1": 1.0,
+                "0": 0.0,
+            }
+        )
+
+    return records
 
 
 def parse_args():
@@ -398,6 +591,7 @@ def main():
     word_scores_path = run_dir / "speechxai_word_scores.csv"
     selected_intervals_path = run_dir / "selected_intervals.csv"
     original_predictions_path = run_dir / "original_predictions.csv"
+    audio_progress_path = run_dir / "audio_progress.csv"
     failures_path = run_dir / "failures.csv"
     summary_path = run_dir / "duration_matched_summary.csv"
 
@@ -429,7 +623,32 @@ def main():
     failures = []
     completed = 0
     skipped = 0
+    persisted_original_prediction_rows = 0
+    persisted_deletion_rows = 0
+    persisted_word_score_rows = 0
+    persisted_selected_interval_rows = 0
+    persisted_failure_rows = 0
+    persisted_audio_progress_rows = 0
+    total_examples = len(selected_examples)
+    started_at = time.monotonic()
+    interrupted = False
+    interrupted_audio_id = None
     for index, example in enumerate(selected_examples, start=1):
+        def progress() -> str:
+            return _progress_suffix(
+                index=index,
+                total=total_examples,
+                started_at=started_at,
+                completed=completed,
+                skipped=skipped,
+                failed=len(failures),
+            )
+
+        original_prediction = None
+        original_prediction_rows = 0
+        deletion_rows = 0
+        word_score_rows = 0
+        selected_interval_rows = 0
         try:
             waveform, sampling_rate = load_audio_mono_16k(example.audio_path)
             original_prediction = classify_waveform(
@@ -439,7 +658,7 @@ def main():
                 sampling_rate,
                 device=device,
             )
-            append_frame(
+            original_prediction_rows = append_frame(
                 original_predictions_path,
                 pd.DataFrame(
                     [
@@ -459,15 +678,45 @@ def main():
                     ]
                 ),
             )
+            persisted_original_prediction_rows += original_prediction_rows
             if (
                 args.correct_only
                 and example.true_class is not None
                 and original_prediction.predicted_class != example.true_class
             ):
                 skipped += 1
+                persisted_audio_progress_rows += append_frame(
+                    audio_progress_path,
+                    pd.DataFrame(
+                        [
+                            audio_progress_record(
+                                example=example,
+                                index=index,
+                                total=total_examples,
+                                status="skipped_incorrect",
+                                started_at=started_at,
+                                completed=completed,
+                                skipped=skipped,
+                                failed=len(failures),
+                                original_prediction=original_prediction,
+                                original_prediction_rows=original_prediction_rows,
+                                total_original_prediction_rows=(
+                                    persisted_original_prediction_rows
+                                ),
+                                total_deletion_rows=persisted_deletion_rows,
+                                total_word_score_rows=persisted_word_score_rows,
+                                total_selected_interval_rows=(
+                                    persisted_selected_interval_rows
+                                ),
+                                total_failure_rows=persisted_failure_rows,
+                            )
+                        ]
+                    ),
+                )
                 print(
-                    f"[{index}/{len(selected_examples)}] skipped incorrect "
-                    f"{example.dataset}/{example.audio_id}"
+                    f"{progress()} persisted progress row; skipped incorrect "
+                    f"{example.dataset}/{example.audio_id}",
+                    flush=True,
                 )
                 continue
 
@@ -495,15 +744,96 @@ def main():
                 ),
                 original_prediction=original_prediction,
             )
-            append_frame(deletion_path, result.deletion_records)
-            append_frame(word_scores_path, result.speechxai_word_scores)
-            append_frame(selected_intervals_path, result.selected_intervals)
-            completed += 1
-            print(
-                f"[{index}/{len(selected_examples)}] evaluated "
-                f"{example.dataset}/{example.audio_id}: "
-                f"{len(result.deletion_records)} deletion rows"
+            deletion_rows = append_frame(deletion_path, result.deletion_records)
+            word_score_rows = append_frame(word_scores_path, result.speechxai_word_scores)
+            selected_interval_rows = append_frame(
+                selected_intervals_path,
+                result.selected_intervals,
             )
+            persisted_deletion_rows += deletion_rows
+            persisted_word_score_rows += word_score_rows
+            persisted_selected_interval_rows += selected_interval_rows
+            completed += 1
+            persisted_audio_progress_rows += append_frame(
+                audio_progress_path,
+                pd.DataFrame(
+                    [
+                        audio_progress_record(
+                            example=example,
+                            index=index,
+                            total=total_examples,
+                            status="completed",
+                            started_at=started_at,
+                            completed=completed,
+                            skipped=skipped,
+                            failed=len(failures),
+                            original_prediction=original_prediction,
+                            original_prediction_rows=original_prediction_rows,
+                            deletion_rows=deletion_rows,
+                            word_score_rows=word_score_rows,
+                            selected_interval_rows=selected_interval_rows,
+                            total_original_prediction_rows=(
+                                persisted_original_prediction_rows
+                            ),
+                            total_deletion_rows=persisted_deletion_rows,
+                            total_word_score_rows=persisted_word_score_rows,
+                            total_selected_interval_rows=(
+                                persisted_selected_interval_rows
+                            ),
+                            total_failure_rows=persisted_failure_rows,
+                        )
+                    ]
+                ),
+            )
+            print(
+                f"{progress()} "
+                f"evaluated {example.dataset}/{example.audio_id}: "
+                f"{deletion_rows} deletion rows persisted; "
+                f"{persisted_audio_progress_rows} audio progress rows",
+                flush=True,
+            )
+        except KeyboardInterrupt:
+            interrupted = True
+            interrupted_audio_id = example.audio_id
+            persisted_audio_progress_rows += append_frame(
+                audio_progress_path,
+                pd.DataFrame(
+                    [
+                        audio_progress_record(
+                            example=example,
+                            index=index,
+                            total=total_examples,
+                            status="interrupted",
+                            started_at=started_at,
+                            completed=completed,
+                            skipped=skipped,
+                            failed=len(failures),
+                            original_prediction=original_prediction,
+                            original_prediction_rows=original_prediction_rows,
+                            deletion_rows=deletion_rows,
+                            word_score_rows=word_score_rows,
+                            selected_interval_rows=selected_interval_rows,
+                            total_original_prediction_rows=(
+                                persisted_original_prediction_rows
+                            ),
+                            total_deletion_rows=persisted_deletion_rows,
+                            total_word_score_rows=persisted_word_score_rows,
+                            total_selected_interval_rows=(
+                                persisted_selected_interval_rows
+                            ),
+                            total_failure_rows=persisted_failure_rows,
+                            error_type="KeyboardInterrupt",
+                            error_message="Interrupted by user.",
+                        )
+                    ]
+                ),
+            )
+            print(
+                f"{progress()} interrupted during {example.dataset}/{example.audio_id}; "
+                "partial progress row persisted and final partial outputs will be written",
+                flush=True,
+            )
+            break
         except Exception as error:  # noqa: BLE001
             failure = {
                 **example.to_record(),
@@ -512,16 +842,59 @@ def main():
                 "traceback": traceback.format_exc(),
             }
             failures.append(failure)
-            append_frame(failures_path, pd.DataFrame([failure]))
+            failure_rows = append_frame(failures_path, pd.DataFrame([failure]))
+            persisted_failure_rows += failure_rows
+            persisted_audio_progress_rows += append_frame(
+                audio_progress_path,
+                pd.DataFrame(
+                    [
+                        audio_progress_record(
+                            example=example,
+                            index=index,
+                            total=total_examples,
+                            status="failed",
+                            started_at=started_at,
+                            completed=completed,
+                            skipped=skipped,
+                            failed=len(failures),
+                            original_prediction=original_prediction,
+                            original_prediction_rows=original_prediction_rows,
+                            failure_rows=failure_rows,
+                            total_original_prediction_rows=(
+                                persisted_original_prediction_rows
+                            ),
+                            total_deletion_rows=persisted_deletion_rows,
+                            total_word_score_rows=persisted_word_score_rows,
+                            total_selected_interval_rows=(
+                                persisted_selected_interval_rows
+                            ),
+                            total_failure_rows=persisted_failure_rows,
+                            error_type=type(error).__name__,
+                            error_message=str(error),
+                        )
+                    ]
+                ),
+            )
             print(
-                f"[{index}/{len(selected_examples)}] failed "
-                f"{example.dataset}/{example.audio_id}: {type(error).__name__}: {error}"
+                f"{progress()} failed "
+                f"{example.dataset}/{example.audio_id}: {type(error).__name__}: {error}; "
+                f"failure row and progress row persisted",
+                flush=True,
             )
             if args.fail_fast:
                 raise
 
+    actual_deletion_rows = 0
     if deletion_path.is_file():
-        records = pd.read_csv(deletion_path)
+        records = read_duration_matched_records(deletion_path)
+        actual_deletion_rows = len(records)
+        if actual_deletion_rows != persisted_deletion_rows:
+            print(
+                "WARNING: duration_matched_records.csv row count differs from "
+                "the per-audio persisted counter: "
+                f"csv={actual_deletion_rows}, counter={persisted_deletion_rows}.",
+                flush=True,
+            )
         summary = summarize_duration_matched_records(records)
         summary.to_csv(summary_path, index=False)
     else:
@@ -564,6 +937,8 @@ def main():
             "completed_audio_count": completed,
             "skipped_audio_count": skipped,
             "failed_audio_count": len(failures),
+            "interrupted": interrupted,
+            "interrupted_audio_id": interrupted_audio_id,
             "correct_only": args.correct_only,
             "ks": args.ks,
             "random_trials": args.random_trials,
@@ -583,6 +958,7 @@ def main():
             "outputs": {
                 "audio_manifest": "audio_manifest.csv",
                 "original_predictions": "original_predictions.csv",
+                "audio_progress": "audio_progress.csv",
                 "duration_matched_records": "duration_matched_records.csv",
                 "duration_matched_summary": "duration_matched_summary.csv",
                 "speechxai_word_scores": "speechxai_word_scores.csv",
@@ -593,6 +969,15 @@ def main():
             "reproducibility": collect_reproducibility_metadata(
                 speechxai_root=args.speechxai_root,
             ),
+            "persisted_row_counts": {
+                "original_predictions": persisted_original_prediction_rows,
+                "audio_progress": persisted_audio_progress_rows,
+                "duration_matched_records": persisted_deletion_rows,
+                "duration_matched_records_read_back": actual_deletion_rows,
+                "speechxai_word_scores": persisted_word_score_rows,
+                "selected_intervals": persisted_selected_interval_rows,
+                "failures": persisted_failure_rows,
+            },
         },
     )
 
@@ -602,9 +987,15 @@ def main():
     print("Completed audios:", completed)
     print("Skipped audios:", skipped)
     print("Failed audios:", len(failures))
+    print("Interrupted:", interrupted)
+    if interrupted_audio_id is not None:
+        print("Interrupted audio:", interrupted_audio_id)
+    print("Audio progress rows:", persisted_audio_progress_rows)
     if not summary.empty:
-        print("Deletion records:", len(pd.read_csv(deletion_path)))
+        print("Deletion records:", actual_deletion_rows)
         print("Summary rows:", len(summary))
+    if interrupted:
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

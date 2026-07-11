@@ -80,6 +80,7 @@ src/evaluation/
 scripts/
   run_relevance_explanation.py    # one-audio explanation
   evaluate_duration_matched_speechxai.py # full SpeechXAI/Pastor comparison
+  run_colab_duration_matched_eval.py # Colab setup and full GPU run helper
   evaluate_ravdess.py             # RAVDESS prediction baseline
   evaluate_iemocap.py             # IEMOCAP prediction baseline
   evaluate_deletion_faithfulness.py
@@ -311,142 +312,46 @@ Paste the following cell into Google Colab after selecting a GPU runtime
 (`Runtime -> Change runtime type -> GPU`). The cell fails immediately if CUDA is
 not visible or if PyTorch is not using the GPU.
 
-Before running it, put IEMOCAP in Google Drive and edit `IEMOCAP_ROOT` so it
-points to the directory that contains `Session1` through `Session5`. RAVDESS is
-downloaded automatically when it is not already present.
+Before running it, create a Colab Secret named `KAGGLE_API_TOKEN`, paste a valid
+Kaggle API token, and enable Notebook access for that secret. The helper script
+downloads IEMOCAP from Kaggle, downloads RAVDESS from Zenodo, stores reusable
+SpeechXAI word-alignment cache files in Google Drive, and writes results to
+Google Drive.
 
 ```python
-# Full duration-matched evaluation on Google Colab GPU.
-# Edit this path before running. It must contain Session1, ..., Session5.
-IEMOCAP_ROOT = "/content/drive/MyDrive/datasets/IEMOCAP_full_release"
-
-from collections import Counter
 from pathlib import Path
-import os
 import subprocess
+import shutil
 import sys
-import urllib.request
-import zipfile
-
 
 REPO_URL = "https://github.com/MateusWiteck/gradient_based_speach_xai.git"
+PROJECT_BRANCH = "main"
 PROJECT_DIR = Path("/content/gradient_based_speach_xai")
-RAVDESS_ROOT = Path("/content/data/ravdess/Audio_Speech_Actors_01-24")
-OUTPUT_ROOT = Path(
-    "/content/drive/MyDrive/gradient_based_speech_xai_outputs/"
-    "test_06_duration_matched_full_both_datasets"
-)
-SPEECHXAI_COMMIT = "7c43d0ce90c82ca3d2f860534136f06d3640e8d0"
 
 
 def run(command, cwd=None):
     print("+", " ".join(str(part) for part in command), flush=True)
-    subprocess.run(
-        [str(part) for part in command],
-        cwd=str(cwd) if cwd is not None else None,
-        check=True,
-    )
+    subprocess.run([str(part) for part in command], cwd=cwd, check=True)
 
 
-try:
-    from google.colab import drive
-except ImportError as error:
-    raise RuntimeError("This cell is intended to run inside Google Colab.") from error
+if PROJECT_DIR.exists() and not (PROJECT_DIR / ".git").exists():
+    shutil.rmtree(PROJECT_DIR)
 
-drive.mount("/content/drive")
+if not (PROJECT_DIR / ".git").exists():
+    run(["git", "clone", "--branch", PROJECT_BRANCH, "--single-branch", REPO_URL, PROJECT_DIR])
+else:
+    run(["git", "remote", "set-url", "origin", REPO_URL], cwd=PROJECT_DIR)
+    run(["git", "fetch", "--prune", "origin", PROJECT_BRANCH], cwd=PROJECT_DIR)
+    run(["git", "checkout", "-B", PROJECT_BRANCH, f"origin/{PROJECT_BRANCH}"], cwd=PROJECT_DIR)
+    run(["git", "reset", "--hard", f"origin/{PROJECT_BRANCH}"], cwd=PROJECT_DIR)
 
-# Hard GPU checks. These intentionally raise before the long evaluation starts.
-run(["nvidia-smi"])
-try:
-    import torch
-except ImportError:
-    torch = None
-if torch is not None and not torch.cuda.is_available():
-    raise RuntimeError("CUDA is not available. Change the Colab runtime type to GPU.")
+run(["git", "log", "-1", "--oneline"], cwd=PROJECT_DIR)
 
-if not PROJECT_DIR.exists():
-    run(["git", "clone", "--recursive", REPO_URL, PROJECT_DIR])
-
-run(["git", "submodule", "update", "--init", "--recursive", "third_party/LeGrad"], cwd=PROJECT_DIR)
-
-speechxai_dir = PROJECT_DIR / "third_party" / "SpeechXAI"
-if not speechxai_dir.exists():
-    run(["git", "clone", "https://github.com/elianap/SpeechXAI.git", speechxai_dir])
-run(["git", "fetch", "origin"], cwd=speechxai_dir)
-run(["git", "checkout", SPEECHXAI_COMMIT], cwd=speechxai_dir)
-
-run([sys.executable, "-m", "pip", "install", "-U", "pip", "wheel"])
-run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=PROJECT_DIR)
-
-cuda_check = (
-    "import torch; "
-    "assert torch.cuda.is_available(), 'CUDA is not available after dependency install'; "
-    "print('CUDA device:', torch.cuda.get_device_name(0)); "
-    "print('torch:', torch.__version__)"
-)
-run([sys.executable, "-c", cuda_check], cwd=PROJECT_DIR)
-
-if not RAVDESS_ROOT.exists():
-    ravdess_dir = RAVDESS_ROOT.parent
-    ravdess_dir.mkdir(parents=True, exist_ok=True)
-    ravdess_zip = ravdess_dir / "Audio_Speech_Actors_01-24.zip"
-    if not ravdess_zip.exists():
-        urllib.request.urlretrieve(
-            "https://zenodo.org/records/1188976/files/"
-            "Audio_Speech_Actors_01-24.zip?download=1",
-            ravdess_zip,
-        )
-    with zipfile.ZipFile(ravdess_zip) as archive:
-        archive.extractall(ravdess_dir)
-
-iemocap_root = Path(IEMOCAP_ROOT)
-if not (iemocap_root / "Session1").is_dir():
-    raise FileNotFoundError(
-        f"IEMOCAP_ROOT={iemocap_root} does not contain Session1. "
-        "Edit IEMOCAP_ROOT before running the cell."
-    )
-
-sys.path.insert(0, str(PROJECT_DIR))
-from scripts.evaluate_duration_matched_speechxai import collect_examples
-from src.evaluation.iemocap import STANDARD_SESSION_IDS
-
-examples = collect_examples(
-    datasets=["iemocap", "ravdess"],
-    iemocap_root=iemocap_root,
-    iemocap_sessions=STANDARD_SESSION_IDS,
-    ravdess_root=RAVDESS_ROOT,
-)
-counts = Counter(example.dataset for example in examples)
-print("Selected records:", dict(sorted(counts.items())), "total=", len(examples))
-if counts.get("IEMOCAP") != 5531 or counts.get("RAVDESS") != 672:
-    raise RuntimeError(
-        "Unexpected dataset counts. Expected IEMOCAP=5531 and RAVDESS=672. "
-        f"Got {dict(counts)}."
-    )
-
-OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 run(
     [
         sys.executable,
-        "scripts/evaluate_duration_matched_speechxai.py",
-        "--datasets",
-        "iemocap,ravdess",
-        "--iemocap-root",
-        iemocap_root,
-        "--ravdess-root",
-        RAVDESS_ROOT,
-        "--output-root",
-        OUTPUT_ROOT,
-        "--ks",
-        "1,2,3,5",
-        "--random-trials",
-        "20",
-        "--device",
-        "cuda",
-        "--speechxai-compute-type",
-        "float16",
-        "--speechxai-batch-size",
-        "1",
+        "scripts/run_colab_duration_matched_eval.py",
+        "--require-gpu",
     ],
     cwd=PROJECT_DIR,
 )
@@ -471,6 +376,7 @@ The generated result files are:
 ```text
 audio_manifest.csv              # selected audio provenance
 original_predictions.csv        # unmasked HuBERT predictions
+audio_progress.csv              # one synced checkpoint row after each audio
 duration_matched_records.csv    # per-mask deletion records
 duration_matched_summary.csv    # aggregate confidence-drop summary
 speechxai_word_scores.csv       # SpeechXAI/Pastor word leave-one-out scores
@@ -479,6 +385,13 @@ method_catalog.csv              # method labels and descriptions
 failures.csv                    # written only when an audio fails
 config.json                     # full run configuration
 ```
+
+`audio_progress.csv` is written after each audio finishes, is skipped, or fails.
+It records how many rows were persisted to each table and can be used to audit
+partial Colab runs without waiting for the final summary step.
+If a run is interrupted with `Ctrl+C`, the current audio is marked as
+`interrupted`, partial summary/config files are written, and the process exits
+with code `130`.
 
 The random baseline is random deletion by silence masking: random fixed-duration
 audio bins are selected to match the SpeechXAI top-k duration, set to zero, and
