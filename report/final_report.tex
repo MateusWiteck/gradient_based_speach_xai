@@ -103,6 +103,8 @@ Higher \(\Delta p\) means the selected region was more important for the model's
 
 \section{Experiments and Analysis}
 
+Before the dataset comparison, the notebooks validate the pipeline on the same IEMOCAP utterance. SpeechXAI alignment and word masking run end-to-end; HuBERT exposes 12 attention layers and 201 temporal tokens for that audio; LeGrad-HuBERT returns layer relevance tensors of shape \((1,12,201)\); and the Level 3 notebook reconstructs \(\mathrm{normalize}(\texttt{rollout\_score}\odot\texttt{head\_relevance})\) with maximum absolute difference 0.0 from the implementation.
+
 We evaluate IEMOCAP and RAVDESS separately. The available IEMOCAP run is partial and must not be described as a full-dataset result: it keeps 5460 audios out of 5531 expected, with one incomplete audio after filtering. The available RAVDESS run keeps 671 audios out of 672 expected. Table \ref{tab:main-results} reports mean confidence drop; numbers in parentheses are the relative change compared with Pastor/SpeechXAI at the same dataset and \(k\).
 
 \begin{table}[h]
