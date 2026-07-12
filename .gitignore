@@ -5,19 +5,29 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.codex/
+.agents/
 
+# Local datasets and generated audio
+data/*
+!data/README.md
 data/raw/
 data/iemocap/
 data/ravdess/
 data/Session*/
 data/metadata.csv
-data/*.wav
-data/*.flac
-data/*.mp3
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
 
+# Generated experiment outputs
+outputs/*
+!outputs/INDEX.md
 results/*
 !results/README.md
-outputs/
 
 pretrained_models/
 wav2vec2_checkpoints/
@@ -30,7 +40,10 @@ references/*
 
 *.pkl
 *.pt
+*.pth
 *.ckpt
+*.safetensors
+*.bin
 *.onnx
 
 # LaTeX build artifacts
@@ -40,3 +53,8 @@ references/*
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
