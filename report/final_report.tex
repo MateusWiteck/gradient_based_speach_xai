@@ -5,6 +5,7 @@
 \usepackage{array}
 \usepackage{booktabs}
 \usepackage{enumitem}
+\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{tabularx}
 \usepackage{xcolor}
@@ -105,9 +106,9 @@ Higher \(\Delta p\) means the selected region was more important for the model's
 
 \section{Experiments and Analysis}
 
-Before the dataset comparison, we validated the pipeline on the same IEMOCAP utterance. SpeechXAI alignment and word masking run end-to-end; HuBERT exposes 12 attention layers and 201 temporal tokens for that audio; LeGrad-HuBERT returns layer relevance tensors of shape \((1,12,201)\); and the independent Level 3 reconstruction of \(\mathrm{normalize}(\texttt{rollout\_score}\odot\texttt{head\_relevance})\) has maximum absolute difference 0.0 from the implementation.
+\textbf{Validation.} Before the dataset comparison, we validated the pipeline on the same IEMOCAP utterance. SpeechXAI alignment and word masking run end-to-end; HuBERT exposes 12 attention layers and 201 temporal tokens for that audio; LeGrad-HuBERT returns layer relevance tensors of shape \((1,12,201)\); and the independent Level 3 reconstruction of \(\mathrm{normalize}(\texttt{rollout\_score}\odot\texttt{head\_relevance})\) has maximum absolute difference 0.0 from the implementation.
 
-We evaluate IEMOCAP and RAVDESS separately. The available IEMOCAP run is partial and must not be described as a full-dataset result: it keeps 5460 audios out of 5531 expected, with one incomplete audio after filtering. The available RAVDESS run keeps 671 audios out of 672 expected. Table \ref{tab:main-results} reports mean confidence drop; numbers in parentheses are the relative change compared with Pastor/SpeechXAI at the same dataset and \(k\). The second line reports the percentage of paired audios for which the method's confidence drop is larger than Pastor/SpeechXAI.
+\textbf{Dataset-level deletion comparison.} We evaluate IEMOCAP and RAVDESS separately. The available IEMOCAP run is partial and must not be described as a full-dataset result: it keeps 5460 audios out of 5531 expected, with one incomplete audio after filtering. The available RAVDESS run keeps 671 audios out of 672 expected. Table \ref{tab:main-results} reports mean confidence drop; numbers in parentheses are the relative change compared with Pastor/SpeechXAI at the same dataset and \(k\). The second line reports the percentage of paired audios for which the method's confidence drop is larger than Pastor/SpeechXAI.
 
 \begin{table}[h]
 \centering
@@ -132,11 +133,26 @@ RAVDESS & 5 & \resultcell{0.227}{baseline} & \resultcell{0.207 (-8.8\%)}{beats 4
 \label{tab:main-results}
 \end{table}
 
-The current evidence suggests two different regimes. On IEMOCAP, Level 3 is the strongest method across all \(k\), improving over Pastor/SpeechXAI by 12.0\% to 23.7\%. LeGrad layer-local variants become competitive only when more duration is removed, especially at \(k=3\) and \(k=5\). On RAVDESS, LeGrad layer-local variants dominate, with gains above 47\% for every \(k\), while Level 3 is weaker at \(k=1\) and improves as the removed duration grows. This supports the project hypothesis that finer temporal granularity can improve deletion faithfulness, but it also shows that the best gradient-based construction depends on the dataset and audio distribution.
+\textbf{Dataset-level interpretation.} The current evidence suggests two different regimes. On IEMOCAP, Level 3 is the strongest method across all \(k\), improving over Pastor/SpeechXAI by 12.0\% to 23.7\%. LeGrad layer-local variants become competitive only when more duration is removed, especially at \(k=3\) and \(k=5\). On RAVDESS, LeGrad layer-local variants dominate, with gains above 47\% for every \(k\), while Level 3 is weaker at \(k=1\) and improves as the removed duration grows. This supports the project hypothesis that finer temporal granularity can improve deletion faithfulness, but it also shows that the best gradient-based construction depends on the dataset and audio distribution.
 
-Several factors may explain this dataset gap. First, IEMOCAP contains conversational speech with longer turns, interruptions, pauses, and lexical variation; word-level removal can therefore capture semantically meaningful events, and rollout-style context propagation may help distribute relevance across longer dependencies. RAVDESS uses shorter controlled sentences, where the lexical content is repeated and emotion is expressed more strongly through local acoustic cues such as intensity, pitch, and voice quality; direct LeGrad attention-gradient scores may align better with these localized cues. Second, the HuBERT classifier is not equally reliable across datasets: the RAVDESS diagnostic run has 228 correctly predicted utterances out of 672, so the evaluated subset is biased toward decisions the model already handles well. Third, the same removed-time budget can correspond to different semantic units: in IEMOCAP, a word-level interval may cover rich conversational content, while in RAVDESS the same duration can mostly cover short acoustic emphasis. These points are plausible explanations rather than isolated causal tests, but they clarify why a single attribution method should not be assumed to dominate across speech corpora.
+Several factors may explain this dataset gap. First, IEMOCAP contains conversational speech with longer turns, interruptions, pauses, and lexical variation; word-level removal can therefore capture semantically meaningful events, and rollout-style context propagation may help distribute relevance across longer dependencies. RAVDESS uses shorter controlled sentences, where the lexical content is repeated and emotion is expressed more strongly through local acoustic cues such as intensity, pitch, and voice quality; direct LeGrad attention-gradient scores may align better with these localized cues. Second, the HuBERT classifier is not equally reliable across datasets: the RAVDESS diagnostic run has 228 correctly predicted utterances out of 672, so the evaluated subset is biased toward decisions the model already handles well. Third, the same removed-time budget can correspond to different semantic units: in IEMOCAP, a word-level interval may cover rich conversational content, while in RAVDESS the same duration can mostly cover short acoustic emphasis. These points are plausible explanations rather than isolated causal tests.
 
-\textbf{RAVDESS diagnostic evaluation.} We also ran additional diagnostics on the 228 RAVDESS utterances that the HuBERT classifier predicted correctly. Deletion AOPC averages the target-class probability drop after silencing the top relevance tokens at 5\%, 10\%, 20\%, and 30\% budgets. Class-specificity is the Pearson correlation between predicted-class and runner-up-class relevance maps, where lower is better. Concentration is the relevance mass contained in the top 10\% tokens, where higher is more localized.
+\textbf{Qualitative case analysis.} To connect the aggregate table with concrete behavior, Figure \ref{fig:iemocap-case-comparison} compares the IEMOCAP LeGrad final-score mean-layer case where our method improves most over Pastor/SpeechXAI with the case where it performs worst.
+
+\vspace{-0.4em}
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.485\linewidth]{figures/iemocap_legrad_mean_best_ses05m_script01_1_m020_k5.png}
+\includegraphics[width=0.485\linewidth]{figures/iemocap_legrad_mean_worst_ses05m_impro07_m002_k2.png}
+\vspace{-0.9em}
+\caption{\scriptsize IEMOCAP best and worst LeGrad final-score mean-layer cases. Blue intervals are Pastor word masks; red intervals are duration-matched HuBERT token masks.}
+\label{fig:iemocap-case-comparison}
+\end{figure}
+\vspace{-1.0em}
+
+The case comparison illustrates the pattern behind the quantitative evaluation. When the HuBERT token attribution is scattered into many short, sparse fragments, as in the worst IEMOCAP example, the selected regions can miss the word-level evidence captured by Pastor/SpeechXAI, producing a smaller confidence drop. When the selected tokens are more temporally concentrated around the relevant spoken region, as in the best example, the finer granularity becomes useful and the HuBERT attribution removes evidence that Pastor's word mask leaves behind.
+
+\textbf{Additional RAVDESS diagnostics.} Finally, we ran diagnostics on the 228 RAVDESS utterances that the HuBERT classifier predicted correctly. Deletion AOPC averages the target-class probability drop after silencing the top relevance tokens at 5\%, 10\%, 20\%, and 30\% budgets. Class-specificity is the Pearson correlation between predicted-class and runner-up-class relevance maps, where lower is better. Concentration is the relevance mass contained in the top 10\% tokens, where higher is more localized.
 
 \begin{center}
 \small
@@ -153,10 +169,12 @@ Top-10\% relevance mass \(\uparrow\) & 0.327 & 0.137 & 0.137 \\
 \vspace{-0.4em}
 {\small \emph{Legend.} Deletion AOPC is the average confidence drop after removing the top-ranked temporal regions at the four tested budgets, so higher values indicate stronger deletion faithfulness. Class-specificity Pearson \(\rho\) compares predicted-class and runner-up-class relevance maps, so lower values indicate more class-dependent explanations. Top-10\% relevance mass measures how much relevance is concentrated in the highest-scoring 10\% of tokens, so higher values indicate more localized explanations.}
 
-\textbf{Main conclusion.} Pastor/SpeechXAI remains the most interpretable explanation because words are directly understandable. Our best gradient-based methods are less semantic but often more faithful when every method removes the same amount of audio time. The strongest measured claim is therefore specific: gradient-based HuBERT token attribution can outperform word-level Pastor/SpeechXAI on confidence-drop faithfulness, especially for RAVDESS and for larger removal budgets. The additional diagnostics show the trade-off behind that result: LeGrad gives the strongest RAVDESS deletion AOPC, while Level 3 gives more class-specific and more concentrated relevance maps.
+\textbf{Main conclusion.} Pastor/SpeechXAI remains the most interpretable explanation because words are directly understandable. Our best gradient-based methods are less semantic but often more faithful when every method removes the same amount of audio time. The strongest measured claim is therefore specific: gradient-based HuBERT token attribution can outperform word-level Pastor/SpeechXAI on confidence-drop faithfulness, especially for RAVDESS and for larger removal budgets. However, the methods behave very differently across datasets: Level 3 is strongest on IEMOCAP, while LeGrad variants are strongest on RAVDESS. The current evidence therefore does not support ranking one attribution family as universally better than the other.
 
 \begin{thebibliography}{9}
-\small
+\fontsize{6}{6.4}\selectfont
+\setlength{\itemsep}{0pt}
+\setlength{\parskip}{0pt}
 
 \bibitem{pastor2024speechxai}
 Eliana Pastor, Alkis Koudounas, Giuseppe Attanasio, Dirk Hovy, and Elena Baralis.
