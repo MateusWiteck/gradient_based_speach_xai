@@ -186,7 +186,17 @@ def main():
         help="Optional dataset name for output-folder provenance (inferred when available).",
     )
     parser.add_argument("--output-root", default="outputs")
-    parser.add_argument("--max-examples", type=int, default=8)
+    parser.add_argument(
+        "--max-examples",
+        type=int,
+        default=8,
+        help="Maximum correct examples to evaluate (default: 8).",
+    )
+    parser.add_argument(
+        "--all-examples",
+        action="store_true",
+        help="Evaluate every correctly classified example; overrides --max-examples.",
+    )
     parser.add_argument("--fractions", default="0.05,0.1,0.2,0.3")
     parser.add_argument("--random-trials", type=int, default=3)
     parser.add_argument("--modes", default=",".join(EXPLANATION_MODES))
@@ -217,7 +227,12 @@ def main():
 
     predictions = pd.read_csv(args.predictions_csv)
     dataset_name = infer_dataset_name(predictions, args.dataset_name)
-    selected_examples = select_correct_examples(predictions, args.max_examples, args.seed)
+    max_examples = (
+        int(predictions["is_correct"].astype(bool).sum())
+        if args.all_examples
+        else args.max_examples
+    )
+    selected_examples = select_correct_examples(predictions, max_examples, args.seed)
     run_dir = create_unique_run_dir(
         args.output_root,
         f"{dataset_slug(dataset_name)}_deletion_faithfulness",
