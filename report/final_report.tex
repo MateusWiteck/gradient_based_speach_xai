@@ -40,7 +40,7 @@ Our project asks a narrower research question: \textbf{do model-specific gradien
 
 Pastor et al. position SpeechXAI against the broader XAI literature in vision, language, and tabular data, including gradient saliency, Integrated Gradients, Grad-CAM, LIME, SHAP, and occlusion-style perturbation methods \cite{pastor2024speechxai}. For speech, they emphasize that many previous explanations are time-frequency heatmaps or phoneme/fixed-frame analyses, which may be less accessible for non-expert users or less suitable for semantically intensive speech classification tasks. Their method follows an input-perturbation view: the relevance of an audio segment is the probability difference between the original utterance and the utterance with that segment masked.
 
-The empirical setting uses two standard acted-emotion speech corpora with different acoustic and interaction profiles. IEMOCAP contains dyadic scripted and improvised conversations, so the model receives longer, more naturalistic utterances with speaker interaction, pauses, and variable prosody \cite{busso2008iemocap}. RAVDESS contains controlled North American English recordings of fixed sentences spoken by actors, providing a cleaner benchmark with less conversational variability \cite{livingstone2018ravdess}. Both datasets are evaluated with the same SUPERB HuBERT emotion-recognition checkpoint: HuBERT converts the waveform into temporal Transformer tokens, and the downstream SUPERB head maps those tokens to the emotion classes \cite{hsu2021hubert,yang2021superb}. Therefore, differences in the results should be read as differences in explanation behavior across datasets, not as differences caused by training or changing the classifier.
+The empirical setting uses two standard acted-emotion speech corpora with different acoustic and interaction profiles. IEMOCAP contains dyadic scripted and improvised conversations, so the model receives longer, more naturalistic utterances with speaker interaction, pauses, and variable prosody \cite{busso2008iemocap}. RAVDESS contains controlled North American English recordings of fixed sentences spoken by actors, providing a cleaner benchmark with less conversational variability \cite{livingstone2018ravdess}. Both datasets are evaluated with the same SUPERB HuBERT emotion-recognition checkpoint: HuBERT converts the waveform into temporal Transformer tokens, and the downstream SUPERB head maps those tokens to the emotion classes \cite{hsu2021hubert,yang2021superb}. The four-class label protocol is also part of the selected checkpoint's task definition: the model card states that SUPERB ER follows the conventional IEMOCAP protocol, dropping unbalanced emotion classes to leave four classes \cite{hfhubertsuperber}. Therefore, differences in the results should be read as differences in explanation behavior across datasets, not as differences caused by training or changing the classifier.
 
 Our work keeps Pastor's faithfulness question but changes the explanation source. Level 3 is a Transformer attention-flow attribution inspired by attention rollout \cite{abnar2020rollout} and class-specific head relevance. LeGrad-HuBERT adapts the LeGrad idea, which treats positive gradients with respect to attention maps as the explanation signal, originally proposed for Vision Transformers \cite{bousselham2024legrad}. In Pastor et al.'s concept-based XAI taxonomy \cite{poeta2024concept}, SpeechXAI's word segments are close to \emph{post-hoc, local, symbolic class-concept relations}: each spoken word is a human-readable concept whose effect on a class is measured. Our methods are more fine-grained and model-specific: they are \emph{post-hoc, local, gradient-based temporal feature attributions} for Transformer audio tokens. They become concept-level explanations only if the selected token intervals are later grouped into words or higher-level speech concepts.
 
@@ -63,7 +63,7 @@ The stored \(\alpha_l\) values are forward mixture parameters, not class-specifi
 
 \section{Methodology}
 
-\textbf{Model and target.} The implemented pipeline loads the HuBERT checkpoint \texttt{superb/\allowbreak hubert-base-superb-er}, with 12 Transformer layers, 12 heads, 768 hidden dimensions, a 256-dimensional projector, masked temporal mean pooling, and four emotion labels: neutral, happy/excited, angry, and sad \cite{hsu2021hubert,yang2021superb}. Every explanation targets the model's original predicted class \(\hat{y}\), not necessarily the dataset ground-truth label. This is important because the explanation is about the model decision being evaluated.
+\textbf{Model and target.} The implemented pipeline loads the HuBERT checkpoint \texttt{superb/\allowbreak hubert-base-superb-er}, with 12 Transformer layers, 12 heads, 768 hidden dimensions, a 256-dimensional projector, masked temporal mean pooling, and four emotion labels: neutral, happy/excited, angry, and sad \cite{hsu2021hubert,yang2021superb,hfhubertsuperber}. We align datasets to this trained output space: IEMOCAP excited is mapped to happy and unsupported labels are excluded, while RAVDESS is filtered to the exact matching emotions. Every explanation targets the model's original predicted class \(\hat{y}\), not necessarily the dataset ground-truth label. This is important because the explanation is about the model decision being evaluated.
 
 \textbf{Pastor/SpeechXAI baseline.} We reproduce the word-level SpeechXAI protocol as the baseline method. WhisperX provides word timestamps, each word interval is silenced, and the score is
 \[
@@ -204,6 +204,11 @@ Shu-wen Yang et al.
 \newblock SUPERB: Speech Processing Universal PERformance Benchmark.
 \newblock Interspeech 2021.
 \newblock \url{https://arxiv.org/abs/2105.01051}
+
+\bibitem{hfhubertsuperber}
+SUPERB.
+\newblock Hubert-Base for Emotion Recognition model card.
+\newblock \url{https://huggingface.co/superb/hubert-base-superb-er}
 
 \end{thebibliography}
 
